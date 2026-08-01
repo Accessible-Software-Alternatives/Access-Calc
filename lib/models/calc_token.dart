@@ -35,7 +35,7 @@ class OperatorToken extends CalcToken {
   }
 }
 
-enum FunctionType { sin, cos, tan, log, ln }
+enum FunctionType { sin, cos, tan, log, ln, asin, acos, atan, squareRoot }
 
 class FunctionToken extends CalcToken {
   final FunctionType type;
@@ -55,6 +55,14 @@ class FunctionToken extends CalcToken {
         return 'log(';
       case FunctionType.ln:
         return 'ln(';
+      case FunctionType.asin:
+        return 'sin⁻¹(';
+      case FunctionType.acos:
+        return 'cos⁻¹(';
+      case FunctionType.atan:
+        return 'tan⁻¹(';
+      case FunctionType.squareRoot:
+        return '√(';
     }
   }
 }

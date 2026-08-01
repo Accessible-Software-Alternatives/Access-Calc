@@ -90,6 +90,9 @@ class ExpressionParser {
           arg <= 0) {
         throw NonrealAnswersError(errorIndex);
       }
+      if (token.type == FunctionType.squareRoot && arg < 0) {
+        throw NonrealAnswersError(errorIndex);
+      }
 
       return _applyFunction(token.type, arg);
     }
@@ -109,6 +112,14 @@ class ExpressionParser {
         return math.log(arg) / math.ln10;
       case FunctionType.ln:
         return math.log(arg);
+      case FunctionType.asin:
+        return math.asin(arg);
+      case FunctionType.acos:
+        return math.acos(arg);
+      case FunctionType.atan:
+        return math.atan(arg);
+      case FunctionType.squareRoot:
+        return math.sqrt(arg);
     }
   }
 }

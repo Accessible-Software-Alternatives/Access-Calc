@@ -305,6 +305,20 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.insertToken(FunctionToken(FunctionType.ln));
         break;
 
+      case ButtonAction.asin:
+        buffer.insertToken(FunctionToken(FunctionType.asin));
+        break;
+      case ButtonAction.acos:
+        buffer.insertToken(FunctionToken(FunctionType.acos));
+        break;
+      case ButtonAction.atan:
+        buffer.insertToken(FunctionToken(FunctionType.atan));
+        break;
+
+      case ButtonAction.squareRoot:
+        buffer.insertToken(FunctionToken(FunctionType.squareRoot));
+        break;
+
       case ButtonAction.leftParen:
         buffer.insertToken(LeftParenToken());
         break;
@@ -324,15 +338,11 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.vars:
       case ButtonAction.reciprocal:
       case ButtonAction.square:
-      case ButtonAction.squareRoot:
       case ButtonAction.store:
       case ButtonAction.mode:
       case ButtonAction.xtheta:
       case ButtonAction.stat:
       case ButtonAction.on:
-      case ButtonAction.asin:
-      case ButtonAction.acos:
-      case ButtonAction.atan:
       case ButtonAction.tenToX:
       case ButtonAction.eToX:
       case ButtonAction.statPlot:
