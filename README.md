@@ -14,7 +14,7 @@ Access-Calc is an open-source graphing calculator built with Flutter with a fami
 
 ```bash
 git clone https://github.com/accessiblesoftwarealternatives-dev/Access-Calc
-cd Access Calc
+cd Access-Calc
 ```
 ### 2. Install Dependencies:
 ```bash
