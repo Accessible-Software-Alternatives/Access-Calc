@@ -56,14 +56,27 @@ class _CalcButtonState extends State<CalcButton> {
     final resolved = widget.data.resolve(widget.mode);
     final style = widget.theme.getStyle(resolved.type);
 
+    // When a second/alpha override changes this button's type, blend the
+    // button's original color with the override color instead of fully
+    // switching to it, so the keypad doesn't turn into a wall of identical
+    // second/alpha-colored buttons.
+    const overrideBlendAmount = 0.5;
+    final Color resolvedBackgroundColor = resolved.type != widget.data.type
+        ? Color.lerp(
+            widget.theme.getStyle(widget.data.type).backgroundColor,
+            style.backgroundColor,
+            overrideBlendAmount,
+          )!
+        : style.backgroundColor;
+
     final active = _isActiveModifier;
 
     final Color baseColor = active
         ? Color.alphaBlend(
             Colors.white.withValues(alpha: 0.22),
-            style.backgroundColor,
+            resolvedBackgroundColor,
           )
-        : style.backgroundColor;
+        : resolvedBackgroundColor;
 
     final legendFontSize = widget.unit * 2.5;
 
