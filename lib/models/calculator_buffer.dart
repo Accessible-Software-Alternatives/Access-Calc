@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:graphing_calculator/models/button_mode.dart';
@@ -9,7 +10,6 @@ import 'package:graphing_calculator/models/expression_parser.dart';
 class CalculatorBuffer extends ChangeNotifier {
   List<CalcLine> lines = [CalcLine([])];
   int cursorRow = 0;
-  int cursorColumn = 0;
   int scrollOffset = 0;
 
   static const int visibleLineCount = 10;
@@ -20,16 +20,68 @@ class CalculatorBuffer extends ChangeNotifier {
 
   ButtonMode mode = ButtonMode.normal;
 
+  bool overwriteMode = true;
+
   CalcError? error;
   List<CalcToken>? _erroredTokens;
 
+  late List<_CursorFrame> _path;
+
   CalculatorBuffer() {
+    _path = [_CursorFrame(lines[cursorRow].tokens, 0)];
     _startCursorTimer();
   }
 
   void setMode(ButtonMode newMode) {
     mode = newMode;
     notifyListeners();
+  }
+
+  void toggleOverwriteMode() {
+    overwriteMode = !overwriteMode;
+    notifyListeners();
+  }
+
+  _CursorFrame get _currentFrame => _path.last;
+
+  List<CalcToken> get cursorTokens => _currentFrame.tokens;
+
+  List<CursorPosition> get cursorPath =>
+      _path.map(_positionInFrame).toList(growable: false);
+
+  bool get isAtEndOfCurrentBox {
+    if (_path.length <= 1) return false;
+    final frame = _currentFrame;
+    return frame.column >= _frameEndColumn(frame.tokens);
+  }
+
+  BoxToken? get currentBoxOwner =>
+      _path.length > 1 ? _currentFrame.owner : null;
+
+  void _applyOverwrite(_CursorFrame frame) {
+    if (!overwriteMode) return;
+
+    final pos = _positionInFrame(frame);
+    if (pos.tokenIndex >= frame.tokens.length) return;
+
+    final token = frame.tokens[pos.tokenIndex];
+
+    if (token is NumberToken) {
+      final text = token.value;
+      final newValue =
+          text.substring(0, pos.offset) + text.substring(pos.offset + 1);
+
+      if (newValue.isEmpty) {
+        frame.tokens.removeAt(pos.tokenIndex);
+      } else {
+        frame.tokens[pos.tokenIndex] = NumberToken(newValue);
+      }
+    } else if (token is BoxToken) {
+      frame.tokens.removeAt(pos.tokenIndex);
+      frame.tokens.insertAll(pos.tokenIndex, token.children);
+    } else {
+      frame.tokens.removeAt(pos.tokenIndex);
+    }
   }
 
   void insertToken(CalcToken token) {
@@ -39,29 +91,31 @@ class CalculatorBuffer extends ChangeNotifier {
 
     _resetCursorBlink();
 
-    final line = lines[cursorRow];
-    final pos = getCursorPosition();
+    final frame = _currentFrame;
+    _applyOverwrite(frame);
 
-    if (pos.tokenIndex < line.tokens.length &&
-        line.tokens[pos.tokenIndex] is NumberToken &&
+    final tokens = frame.tokens;
+    final pos = _positionInFrame(frame);
+
+    if (pos.tokenIndex < tokens.length &&
+        tokens[pos.tokenIndex] is NumberToken &&
         pos.offset > 0 &&
-        pos.offset <
-            (line.tokens[pos.tokenIndex] as NumberToken).value.length) {
-      final number = line.tokens[pos.tokenIndex] as NumberToken;
+        pos.offset < (tokens[pos.tokenIndex] as NumberToken).value.length) {
+      final number = tokens[pos.tokenIndex] as NumberToken;
 
       final left = number.value.substring(0, pos.offset);
       final right = number.value.substring(pos.offset);
 
-      line.tokens.removeAt(pos.tokenIndex);
+      tokens.removeAt(pos.tokenIndex);
 
-      line.tokens.insert(pos.tokenIndex, NumberToken(right));
-      line.tokens.insert(pos.tokenIndex, token);
-      line.tokens.insert(pos.tokenIndex, NumberToken(left));
+      tokens.insert(pos.tokenIndex, NumberToken(right));
+      tokens.insert(pos.tokenIndex, token);
+      tokens.insert(pos.tokenIndex, NumberToken(left));
     } else {
-      line.tokens.insert(pos.tokenIndex, token);
+      tokens.insert(pos.tokenIndex, token);
     }
 
-    cursorColumn += token.displayText.length;
+    frame.column += token.cursorLength;
 
     notifyListeners();
   }
@@ -73,33 +127,95 @@ class CalculatorBuffer extends ChangeNotifier {
 
     _resetCursorBlink();
 
-    final line = lines[cursorRow];
+    final frame = _currentFrame;
+    final tokens = frame.tokens;
 
-    final pos = getCursorPosition();
+    var pos = _positionInFrame(frame);
 
     final prevIndex = pos.tokenIndex - 1;
+    final ahead = pos.tokenIndex < tokens.length
+        ? tokens[pos.tokenIndex]
+        : null;
+
     final isAfterNumber =
         pos.offset == 0 &&
         prevIndex >= 0 &&
-        line.tokens[prevIndex] is NumberToken;
+        tokens[prevIndex] is NumberToken &&
+        ahead is! BoxToken;
 
     if (isAfterNumber) {
-      final number = line.tokens[prevIndex] as NumberToken;
-      line.tokens[prevIndex] = NumberToken(number.value + digit);
-    } else if (pos.tokenIndex < line.tokens.length &&
-        line.tokens[pos.tokenIndex] is NumberToken) {
-      final number = line.tokens[pos.tokenIndex] as NumberToken;
-
-      final text = number.value;
-
-      line.tokens[pos.tokenIndex] = NumberToken(
-        text.substring(0, pos.offset) + digit + text.substring(pos.offset),
-      );
-    } else {
-      line.tokens.insert(pos.tokenIndex, NumberToken(digit));
+      final number = tokens[prevIndex] as NumberToken;
+      tokens[prevIndex] = NumberToken(number.value + digit);
+      frame.column++;
+      notifyListeners();
+      return;
     }
 
-    cursorColumn++;
+    _applyOverwrite(frame);
+    pos = _positionInFrame(frame);
+
+    final leftIndex = pos.tokenIndex - 1;
+    final leftIsNumber =
+        pos.offset == 0 && leftIndex >= 0 && tokens[leftIndex] is NumberToken;
+
+    final rightToken = pos.tokenIndex < tokens.length
+        ? tokens[pos.tokenIndex]
+        : null;
+    final rightIsNumber = rightToken is NumberToken;
+
+    if (pos.offset > 0 && rightIsNumber) {
+      final text = (rightToken).value;
+      tokens[pos.tokenIndex] = NumberToken(
+        text.substring(0, pos.offset) + digit + text.substring(pos.offset),
+      );
+    } else if (leftIsNumber && rightIsNumber) {
+      final left = tokens[leftIndex] as NumberToken;
+      final right = rightToken;
+      tokens[leftIndex] = NumberToken(left.value + digit + right.value);
+      tokens.removeAt(pos.tokenIndex);
+    } else if (leftIsNumber) {
+      final left = tokens[leftIndex] as NumberToken;
+      tokens[leftIndex] = NumberToken(left.value + digit);
+    } else if (rightIsNumber) {
+      final right = rightToken;
+      tokens[pos.tokenIndex] = NumberToken(digit + right.value);
+    } else {
+      tokens.insert(pos.tokenIndex, NumberToken(digit));
+    }
+
+    frame.column++;
+
+    notifyListeners();
+  }
+
+  void insertExponent() {
+    if (!isOnEditableLine) return;
+
+    _insertBoxAndEnter(ExponentToken());
+  }
+
+  void insertSquare() {
+    if (!isOnEditableLine) return;
+
+    insertToken(ExponentToken([NumberToken('2')]));
+  }
+
+  void insertRoot() {
+    if (!isOnEditableLine) return;
+
+    _insertBoxAndEnter(RootToken());
+  }
+
+  void _insertBoxAndEnter(BoxToken box) {
+    _resetCursorBlink();
+
+    final frame = _currentFrame;
+    _applyOverwrite(frame);
+
+    final pos = _positionInFrame(frame);
+    frame.tokens.insert(pos.tokenIndex, box);
+
+    _path.add(_CursorFrame(box.children, 0, box));
 
     notifyListeners();
   }
@@ -109,18 +225,30 @@ class CalculatorBuffer extends ChangeNotifier {
 
     if (!isOnEditableLine) return;
 
-    if (cursorColumn <= 0) return;
+    final frame = _currentFrame;
 
-    final line = lines[cursorRow];
-    final pos = getCursorPosition(column: cursorColumn - 1);
-    final token = pos.tokenIndex < line.tokens.length
-        ? line.tokens[pos.tokenIndex]
+    if (frame.column <= 0) {
+      if (_path.length > 1) {
+        _path.removeLast();
+        notifyListeners();
+      }
+      return;
+    }
+
+    final pos = _positionInFrame(frame, column: frame.column - 1);
+    final token = pos.tokenIndex < frame.tokens.length
+        ? frame.tokens[pos.tokenIndex]
         : null;
 
-    if (_isAtomicBlock(token)) {
-      cursorColumn = cursorColumn - 1 - pos.offset;
+    if (token is BoxToken) {
+      frame.column = frame.column - 1 - pos.offset;
+      _path.add(
+        _CursorFrame(token.children, _frameEndColumn(token.children), token),
+      );
+    } else if (_isAtomicBlock(token)) {
+      frame.column = frame.column - 1 - pos.offset;
     } else {
-      cursorColumn--;
+      frame.column--;
     }
 
     notifyListeners();
@@ -131,18 +259,29 @@ class CalculatorBuffer extends ChangeNotifier {
 
     if (!isOnEditableLine) return;
 
-    if (cursorColumn >= currentLineLength) return;
+    final frame = _currentFrame;
 
-    final line = lines[cursorRow];
-    final pos = getCursorPosition();
-    final token = pos.tokenIndex < line.tokens.length
-        ? line.tokens[pos.tokenIndex]
+    if (frame.column >= _frameEndColumn(frame.tokens)) {
+      if (_path.length > 1) {
+        _path.removeLast();
+        _currentFrame.column += 1;
+        notifyListeners();
+      }
+      return;
+    }
+
+    final pos = _positionInFrame(frame);
+    final token = pos.tokenIndex < frame.tokens.length
+        ? frame.tokens[pos.tokenIndex]
         : null;
 
-    if (_isAtomicBlock(token)) {
-      cursorColumn = (cursorColumn - pos.offset) + token!.displayText.length;
+    if (token is BoxToken) {
+      frame.column = frame.column - pos.offset;
+      _path.add(_CursorFrame(token.children, 0, token));
+    } else if (_isAtomicBlock(token)) {
+      frame.column = (frame.column - pos.offset) + token!.cursorLength;
     } else {
-      cursorColumn++;
+      frame.column++;
     }
 
     notifyListeners();
@@ -152,13 +291,7 @@ class CalculatorBuffer extends ChangeNotifier {
     _resetCursorBlink();
 
     if (cursorRow > 0) {
-      cursorRow--;
-      if (isOnEditableLine) {
-        cursorColumn = cursorColumn.clamp(
-          0,
-          lines[cursorRow].displayText.length,
-        );
-      }
+      _switchLine(cursorRow - 1);
       _updateScroll();
       notifyListeners();
     }
@@ -168,25 +301,31 @@ class CalculatorBuffer extends ChangeNotifier {
     _resetCursorBlink();
 
     if (cursorRow < lines.length - 1) {
-      cursorRow++;
-      if (isOnEditableLine) {
-        cursorColumn = cursorColumn.clamp(
-          0,
-          lines[cursorRow].displayText.length,
-        );
-      }
+      _switchLine(cursorRow + 1);
       _updateScroll();
       notifyListeners();
     }
   }
 
-  CursorPosition getCursorPosition({int? column}) {
-    final tokens = lines[cursorRow].tokens;
+  void _switchLine(int newRow) {
+    final column = _path.first.column;
+    cursorRow = newRow;
 
-    int remaining = column ?? cursorColumn;
+    if (isOnEditableLine) {
+      final maxColumn = _frameEndColumn(lines[cursorRow].tokens);
+      _resetPath(column.clamp(0, maxColumn));
+    } else {
+      _resetPath(0);
+    }
+  }
+
+  CursorPosition _positionInFrame(_CursorFrame frame, {int? column}) {
+    final tokens = frame.tokens;
+
+    int remaining = column ?? frame.column;
 
     for (int i = 0; i < tokens.length; i++) {
-      final length = tokens[i].displayText.length;
+      final length = tokens[i].cursorLength;
 
       if (remaining < length) {
         return CursorPosition(i, remaining);
@@ -198,17 +337,18 @@ class CalculatorBuffer extends ChangeNotifier {
     return CursorPosition(tokens.length, 0);
   }
 
+  int _frameEndColumn(List<CalcToken> tokens) =>
+      tokens.fold(0, (sum, token) => sum + token.cursorLength);
+
   bool _isAtomicBlock(CalcToken? token) {
     return token != null &&
         token is! NumberToken &&
-        token.displayText.length > 1;
+        token is! BoxToken &&
+        token.cursorLength > 1;
   }
 
-  int get currentLineLength {
-    return lines[cursorRow].tokens.fold(
-      0,
-      (sum, token) => sum + token.displayText.length,
-    );
+  void _resetPath([int column = 0]) {
+    _path = [_CursorFrame(lines[cursorRow].tokens, column)];
   }
 
   void clear() {
@@ -225,13 +365,21 @@ class CalculatorBuffer extends ChangeNotifier {
       return;
     }
 
+    if (_path.length > 1) {
+      final frame = _currentFrame;
+      frame.tokens.clear();
+      frame.column = 0;
+      notifyListeners();
+      return;
+    }
+
     final line = lines[cursorRow];
 
     if (line.tokens.isNotEmpty) {
       line.tokens.clear();
-      cursorColumn = 0;
+      _resetPath();
     } else {
-      scrollOffset = lines.length;
+      scrollOffset = lines.length - 1;
     }
 
     notifyListeners();
@@ -257,7 +405,7 @@ class CalculatorBuffer extends ChangeNotifier {
     }
 
     cursorRow = inputIndex.clamp(0, lines.length - 1);
-    cursorColumn = 0;
+    _resetPath();
 
     _updateScroll();
   }
@@ -269,31 +417,47 @@ class CalculatorBuffer extends ChangeNotifier {
 
     _resetCursorBlink();
 
-    final line = lines[cursorRow];
+    final frame = _currentFrame;
+    final tokens = frame.tokens;
 
-    final pos = getCursorPosition();
+    final pos = _positionInFrame(frame);
 
-    if (pos.tokenIndex >= line.tokens.length) {
+    if (pos.tokenIndex >= tokens.length) {
+      if (_path.length > 1 && tokens.isEmpty) {
+        _deleteEnclosingBox();
+        notifyListeners();
+      }
       return;
     }
 
-    final token = line.tokens[pos.tokenIndex];
+    final token = tokens[pos.tokenIndex];
 
     if (token is NumberToken) {
       final text = token.value;
 
-      line.tokens[pos.tokenIndex] = NumberToken(
+      tokens[pos.tokenIndex] = NumberToken(
         text.substring(0, pos.offset) + text.substring(pos.offset + 1),
       );
 
-      if ((line.tokens[pos.tokenIndex] as NumberToken).value.isEmpty) {
-        line.tokens.removeAt(pos.tokenIndex);
+      if ((tokens[pos.tokenIndex] as NumberToken).value.isEmpty) {
+        tokens.removeAt(pos.tokenIndex);
       }
     } else {
-      line.tokens.removeAt(pos.tokenIndex);
+      tokens.removeAt(pos.tokenIndex);
     }
 
     notifyListeners();
+  }
+
+  void _deleteEnclosingBox() {
+    _path.removeLast();
+
+    final parent = _currentFrame;
+    final pos = _positionInFrame(parent);
+
+    if (pos.tokenIndex < parent.tokens.length) {
+      parent.tokens.removeAt(pos.tokenIndex);
+    }
   }
 
   void enter() {
@@ -303,14 +467,10 @@ class CalculatorBuffer extends ChangeNotifier {
       final sourceLine = lines[cursorRow];
       final editableLine = lines.last;
 
-      editableLine.tokens.addAll(
-        sourceLine.tokens.map(
-          (t) => t is NumberToken ? NumberToken(t.value) : t,
-        ),
-      );
+      editableLine.tokens.addAll(sourceLine.tokens.map(_cloneToken));
 
       cursorRow = lines.length - 1;
-      cursorColumn = editableLine.displayText.length;
+      _resetPath(_frameEndColumn(editableLine.tokens));
 
       _updateScroll();
       notifyListeners();
@@ -325,11 +485,11 @@ class CalculatorBuffer extends ChangeNotifier {
           final tokens = lines[i].tokens;
 
           lines.removeLast();
-          lines.add(CalcLine(List<CalcToken>.from(tokens)));
+          lines.add(CalcLine(tokens.map(_cloneToken).toList()));
           _pushResultOrError(tokens);
 
           cursorRow = lines.length - 1;
-          cursorColumn = 0;
+          _resetPath();
 
           _updateScroll();
           notifyListeners();
@@ -342,7 +502,7 @@ class CalculatorBuffer extends ChangeNotifier {
     _pushResultOrError(lines[cursorRow].tokens);
 
     cursorRow = lines.length - 1;
-    cursorColumn = 0;
+    _resetPath();
 
     _updateScroll();
     notifyListeners();
@@ -365,10 +525,78 @@ class CalculatorBuffer extends ChangeNotifier {
   String _evaluate(List<CalcToken> tokens) {
     final parser = ExpressionParser(tokens);
     final result = parser.parseExpression();
-    if (result == result.truncateToDouble()) {
-      return result.toInt().toString();
+    return _formatResult(result, tokens.length);
+  }
+
+  static const int _maxResultChars = 15;
+
+  String _formatResult(double result, int tokenIndex) {
+    if (result.isNaN) return 'Error';
+    if (result.isInfinite) throw OverflowError(tokenIndex);
+    if (result == 0) return '0';
+
+    final isNegative = result < 0;
+    final magnitude = result.abs();
+    final sign = isNegative ? '-' : '';
+    final budget = _maxResultChars - sign.length;
+
+    final plain = _plainForm(magnitude, budget);
+    if (plain != null) return sign + plain;
+
+    return sign + _scientificForm(magnitude, budget);
+  }
+
+  String? _plainForm(double magnitude, int budget) {
+    for (int decimals = 10; decimals >= 0; decimals--) {
+      var text = magnitude.toStringAsFixed(decimals);
+
+      if (text.contains('.')) {
+        text = text.replaceAll(RegExp(r'0+$'), '');
+        text = text.replaceAll(RegExp(r'\.$'), '');
+      }
+
+      if (text.length > budget) continue;
+      if (double.parse(text) == 0) continue;
+
+      return text;
     }
-    return result.toStringAsFixed(10).replaceAll(RegExp(r'0+$'), '');
+
+    return null;
+  }
+
+  String _scientificForm(double magnitude, int budget) {
+    int exponent = (math.log(magnitude) / math.ln10).floor();
+    double mantissa = magnitude / math.pow(10, exponent);
+
+    if (mantissa >= 10) {
+      mantissa /= 10;
+      exponent++;
+    } else if (mantissa < 1) {
+      mantissa *= 10;
+      exponent--;
+    }
+
+    var decimals = _scientificDecimals(exponent, budget);
+    var mantissaText = mantissa.toStringAsFixed(decimals);
+
+    if (double.parse(mantissaText) >= 10) {
+      exponent++;
+      mantissa = double.parse(mantissaText) / 10;
+      decimals = _scientificDecimals(exponent, budget);
+      mantissaText = mantissa.toStringAsFixed(decimals);
+    }
+
+    if (mantissaText.contains('.')) {
+      mantissaText = mantissaText.replaceAll(RegExp(r'0+$'), '');
+      mantissaText = mantissaText.replaceAll(RegExp(r'\.$'), '');
+    }
+
+    return '${mantissaText}E$exponent';
+  }
+
+  int _scientificDecimals(int exponent, int budget) {
+    final fixedChars = 1 + 1 + 1 + exponent.toString().length;
+    return (budget - fixedChars).clamp(0, 10);
   }
 
   void quitError() {
@@ -388,18 +616,27 @@ class CalculatorBuffer extends ChangeNotifier {
 
     if (tokens != null) {
       final editableLine = lines.last;
-      editableLine.tokens.addAll(
-        tokens.map((t) => t is NumberToken ? NumberToken(t.value) : t),
-      );
+      editableLine.tokens.addAll(tokens.map(_cloneToken));
 
       int column = 0;
       for (int i = 0; i < tokens.length && i < tokenIndex; i++) {
-        column += tokens[i].displayText.length;
+        column += tokens[i].cursorLength;
       }
-      cursorColumn = column;
+      _resetPath(column);
     }
 
     notifyListeners();
+  }
+
+  CalcToken _cloneToken(CalcToken token) {
+    if (token is NumberToken) return NumberToken(token.value);
+    if (token is ExponentToken) {
+      return ExponentToken(token.children.map(_cloneToken).toList());
+    }
+    if (token is RootToken) {
+      return RootToken(token.children.map(_cloneToken).toList());
+    }
+    return token;
   }
 
   // temp
@@ -461,4 +698,13 @@ class CursorPosition {
   final int offset;
 
   const CursorPosition(this.tokenIndex, this.offset);
+}
+
+class _CursorFrame {
+  final List<CalcToken> tokens;
+  int column;
+
+  final BoxToken? owner;
+
+  _CursorFrame(this.tokens, this.column, [this.owner]);
 }

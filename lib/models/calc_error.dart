@@ -35,3 +35,13 @@ class NonrealAnswersError extends CalcError {
   String get message =>
       'In REAL MODE, all calculations must result in a real number.';
 }
+
+class OverflowError extends CalcError {
+  OverflowError(super.tokenIndex);
+
+  @override
+  String get title => 'OVERFLOW';
+  @override
+  String get message =>
+      'Calculation exceeds the range of values that this machine can display.';
+}

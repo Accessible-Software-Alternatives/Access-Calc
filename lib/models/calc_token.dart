@@ -1,5 +1,30 @@
 abstract class CalcToken {
   String get displayText;
+
+  int get cursorLength => displayText.length;
+}
+
+abstract class BoxToken extends CalcToken {
+  final List<CalcToken> children;
+
+  BoxToken(this.children);
+
+  @override
+  int get cursorLength => 1;
+}
+
+class ExponentToken extends BoxToken {
+  ExponentToken([List<CalcToken>? children]) : super(children ?? []);
+
+  @override
+  String get displayText => '^(${children.map((t) => t.displayText).join()})';
+}
+
+class RootToken extends BoxToken {
+  RootToken([List<CalcToken>? children]) : super(children ?? []);
+
+  @override
+  String get displayText => '√(${children.map((t) => t.displayText).join()})';
 }
 
 class NumberToken extends CalcToken {

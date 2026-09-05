@@ -231,6 +231,9 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.delete:
         buffer.delete();
         break;
+      case ButtonAction.ins:
+        buffer.toggleOverwriteMode();
+        break;
       case ButtonAction.enter:
         buffer.enter();
         break;
@@ -286,7 +289,7 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.insertToken(OperatorToken(OperatorType.divide));
         break;
       case ButtonAction.power:
-        buffer.insertToken(OperatorToken(OperatorType.power));
+        buffer.insertExponent();
         break;
 
       case ButtonAction.sin:
@@ -316,7 +319,7 @@ extension ButtonActionExecutor on ButtonAction {
         break;
 
       case ButtonAction.squareRoot:
-        buffer.insertToken(FunctionToken(FunctionType.squareRoot));
+        buffer.insertRoot();
         break;
 
       case ButtonAction.leftParen:
@@ -324,6 +327,10 @@ extension ButtonActionExecutor on ButtonAction {
         break;
       case ButtonAction.rightParen:
         buffer.insertToken(RightParenToken());
+        break;
+
+      case ButtonAction.square:
+        buffer.insertSquare();
         break;
 
       case ButtonAction.comma:
@@ -337,7 +344,6 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.prgm:
       case ButtonAction.vars:
       case ButtonAction.reciprocal:
-      case ButtonAction.square:
       case ButtonAction.store:
       case ButtonAction.mode:
       case ButtonAction.xtheta:
@@ -351,7 +357,6 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.calcMenu:
       case ButtonAction.table:
       case ButtonAction.quit:
-      case ButtonAction.ins:
       case ButtonAction.link:
       case ButtonAction.fraction:
       case ButtonAction.list:

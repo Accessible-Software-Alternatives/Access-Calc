@@ -51,16 +51,45 @@ class ExpressionParser {
   }
 
   double _parsePower() {
-    var base = _parsePrimary();
+    // Most calculators make the leading negative sign apply after the power which I don't completely get
+    final leading = _current;
+    bool negate = false;
+    double base;
 
-    if (_current is OperatorToken &&
-        (_current as OperatorToken).type == OperatorType.power) {
-      _pos++;
-      final exp = _parsePower();
-      base = math.pow(base, exp).toDouble();
+    if (leading is NumberToken && leading.value.startsWith('-')) {
+      final magnitude = leading.value.substring(1);
+      if (magnitude.isNotEmpty && double.tryParse(magnitude) != null) {
+        negate = true;
+        _pos++;
+        base = double.parse(magnitude);
+      } else {
+        base = _parsePrimary();
+      }
+    } else {
+      base = _parsePrimary();
     }
 
-    return base;
+    while (true) {
+      if (_current is ExponentToken) {
+        final exponent = _current as ExponentToken;
+        _pos++;
+        final exp = ExpressionParser(exponent.children).parseExpression();
+        base = math.pow(base, exp).toDouble();
+        continue;
+      }
+
+      if (_current is OperatorToken &&
+          (_current as OperatorToken).type == OperatorType.power) {
+        _pos++;
+        final exp = _parsePower();
+        base = math.pow(base, exp).toDouble();
+        continue;
+      }
+
+      break;
+    }
+
+    return negate ? -base : base;
   }
 
   double _parsePrimary() {
@@ -76,6 +105,17 @@ class ExpressionParser {
       final result = parseExpression();
       if (_current is RightParenToken) _pos++;
       return result;
+    }
+
+    if (token is RootToken) {
+      _pos++;
+      final arg = ExpressionParser(token.children).parseExpression();
+
+      if (arg < 0) {
+        throw NonrealAnswersError(_pos - 1);
+      }
+
+      return math.sqrt(arg);
     }
 
     if (token is FunctionToken) {
