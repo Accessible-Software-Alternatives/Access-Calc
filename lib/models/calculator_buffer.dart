@@ -200,6 +200,12 @@ class CalculatorBuffer extends ChangeNotifier {
     insertToken(ExponentToken([NumberToken('2')]));
   }
 
+  void insertReciprocal() {
+    if (!isOnEditableLine) return;
+
+    insertToken(ExponentToken([NumberToken('-1')]));
+  }
+
   void insertRoot() {
     if (!isOnEditableLine) return;
 

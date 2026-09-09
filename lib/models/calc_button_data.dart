@@ -333,6 +333,10 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.insertSquare();
         break;
 
+      case ButtonAction.reciprocal:
+        buffer.insertReciprocal();
+        break;
+
       case ButtonAction.comma:
       case ButtonAction.yEquals:
       case ButtonAction.window:
@@ -343,7 +347,6 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.apps:
       case ButtonAction.prgm:
       case ButtonAction.vars:
-      case ButtonAction.reciprocal:
       case ButtonAction.store:
       case ButtonAction.mode:
       case ButtonAction.xtheta:
