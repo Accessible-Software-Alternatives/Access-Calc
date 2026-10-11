@@ -63,6 +63,10 @@ class CalculatorPainter extends CustomPainter {
         ? buffer.currentBoxOwner
         : null;
 
+    final leadArrowOwner = buffer.isOnEditableLine
+        ? buffer.fractionBeforeCursor
+        : null;
+
     final candidates = buffer.visibleLines;
     final candidateLayouts = <ExpressionLayout>[
       for (int i = 0; i < candidates.length; i++)
@@ -70,6 +74,9 @@ class CalculatorPainter extends CustomPainter {
           candidates[i].tokens,
           cursorEndOwner: (buffer.scrollOffset + i == buffer.cursorRow)
               ? cursorEndOwner
+              : null,
+          leadArrowOwner: (buffer.scrollOffset + i == buffer.cursorRow)
+              ? leadArrowOwner
               : null,
         ),
     ];
@@ -113,6 +120,26 @@ class CalculatorPainter extends CustomPainter {
       }
     }
 
+    double scrollY = 0;
+    if (rows.length == 1 &&
+        buffer.isOnEditableLine &&
+        rows.first.absoluteIndex == buffer.cursorRow &&
+        rows.first.layout.height > size.height) {
+      final located = _locateCursorIn(engine, rows.first, 0);
+      if (located != null) {
+        final leaf = engine.leafMetricsFor(located.smallText);
+        final cursorTop = located.baselineY - leaf.ascent;
+        final cursorBottom = located.baselineY + leaf.descent;
+        if (cursorBottom > size.height) scrollY = cursorBottom - size.height;
+        if (cursorTop - scrollY < 0) scrollY = cursorTop;
+        scrollY = scrollY.clamp(0.0, rows.first.layout.height - size.height);
+      }
+    }
+
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    canvas.translate(0, -scrollY);
+
     double y = 0;
     _Row? editableRow;
     double editableTop = 0;
@@ -149,6 +176,8 @@ class CalculatorPainter extends CustomPainter {
         top: editableTop,
       );
     }
+
+    canvas.restore();
   }
 
   void _paintLine({
@@ -270,6 +299,42 @@ class CalculatorPainter extends CustomPainter {
     final rowHeight = engine.rowHeight;
     final scale = tl.scaleRelativeTo(engine.baseFontSize);
 
+    if (token is FractionToken) {
+      final barY = baselineY - tl.barRise;
+
+      _paintExpression(
+        canvas: canvas,
+        engine: engine,
+        expr: tl.child!,
+        origin: Offset(
+          x + tl.numeratorX,
+          baselineY - tl.numeratorRise - tl.child!.ascent,
+        ),
+        style: style,
+      );
+      _paintExpression(
+        canvas: canvas,
+        engine: engine,
+        expr: tl.child2!,
+        origin: Offset(
+          x + tl.denominatorX,
+          baselineY + tl.denominatorDrop - tl.child2!.ascent,
+        ),
+        style: style,
+      );
+
+      canvas.drawLine(
+        Offset(x + tl.barStart, barY),
+        Offset(x + tl.barStart + tl.barWidth, barY),
+        Paint()
+          ..color = style.color ?? Colors.black
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = (2 * scale).clamp(1.0, 2.0)
+          ..strokeCap = StrokeCap.butt,
+      );
+      return;
+    }
+
     if (token is ExponentToken) {
       final raise = rowHeight * kSuperscriptRaise * scale;
       final childBaseline = baselineY - raise;
@@ -343,16 +408,7 @@ class CalculatorPainter extends CustomPainter {
     required _Row row,
     required double top,
   }) {
-    final path = buffer.cursorPath;
-    final located = _locateCursor(
-      expr: row.layout,
-      path: path,
-      level: 0,
-      originX: 0,
-      baselineY: top + row.layout.ascent,
-      smallText: false,
-      engine: engine,
-    );
+    final located = _locateCursorIn(engine, row, top);
 
     if (located == null) return;
 
@@ -404,13 +460,14 @@ class CalculatorPainter extends CustomPainter {
       return;
     }
 
+    final showLeftArrow = buffer.fractionBeforeCursor != null;
     final showExitArrow =
         buffer.currentBoxOwner is RootToken && buffer.isAtEndOfCurrentBox;
 
-    if (showExitArrow) {
+    if (showExitArrow || showLeftArrow) {
       final arrow = TextPainter(
         text: TextSpan(
-          text: '→',
+          text: showLeftArrow ? '←' : '→',
           style: TextStyle(
             color: Colors.black,
             fontWeight: FontWeight.bold,
@@ -435,6 +492,22 @@ class CalculatorPainter extends CustomPainter {
         Paint()..color = Colors.black,
       );
     }
+  }
+
+  _CursorLocation? _locateCursorIn(
+    ExpressionLayoutEngine engine,
+    _Row row,
+    double top,
+  ) {
+    return _locateCursor(
+      expr: row.layout,
+      path: buffer.cursorPath,
+      level: 0,
+      originX: 0,
+      baselineY: top + row.layout.ascent,
+      smallText: false,
+      engine: engine,
+    );
   }
 
   _CursorLocation? _locateCursor({
@@ -488,7 +561,17 @@ class CalculatorPainter extends CustomPainter {
     double childBaselineY;
     bool childSmallText;
 
-    if (boxToken is ExponentToken) {
+    ExpressionLayout childLayout = tl.child!;
+
+    if (boxToken is FractionToken) {
+      final inDenominator = path[level + 1].part == 1;
+      childLayout = inDenominator ? tl.child2! : tl.child!;
+      childOriginX += inDenominator ? tl.denominatorX : tl.numeratorX;
+      childBaselineY = inDenominator
+          ? baselineY + tl.denominatorDrop
+          : baselineY - tl.numeratorRise;
+      childSmallText = smallText;
+    } else if (boxToken is ExponentToken) {
       childBaselineY = baselineY - engine.rowHeight * kSuperscriptRaise * scale;
       childSmallText = true;
     } else {
@@ -498,7 +581,7 @@ class CalculatorPainter extends CustomPainter {
     }
 
     return _locateCursor(
-      expr: tl.child!,
+      expr: childLayout,
       path: path,
       level: level + 1,
       originX: childOriginX,
@@ -527,9 +610,6 @@ class _CursorLocation {
   final double baselineY;
   final bool smallText;
 
-  /// Width the cursor should cover. Normally one character, but an atomic
-  /// multi-character token (a constant like "10", which the cursor can't
-  /// step inside of) is covered in full.
   final double? width;
 
   _CursorLocation({

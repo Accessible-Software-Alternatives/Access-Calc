@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'calc_token.dart';
@@ -15,6 +17,20 @@ const String kEmptyBoxGlyph = '▭';
 
 const double kExponentScale = 0.65;
 
+const double kFractionBarGap = 0.08;
+
+const double kFractionAxis = 0.28;
+
+const double kFractionSidePad = 0.15;
+
+const int kMaxFractionDepth = 4;
+
+const int kMaxPowerDepth = 4;
+
+const int kMaxRootDepth = 4;
+
+const double kMaxLineHeightRows = 12.5;
+
 class TokenLayout {
   final CalcToken token;
   final double width;
@@ -25,6 +41,17 @@ class TokenLayout {
 
   final ExpressionLayout? child;
 
+  final ExpressionLayout? child2;
+  final double numeratorX;
+  final double denominatorX;
+  final double numeratorRise;
+  final double denominatorDrop;
+  final double barRise;
+  final double barStart;
+  final double barWidth;
+
+  final double leadPad;
+
   TokenLayout({
     required this.token,
     required this.width,
@@ -32,6 +59,15 @@ class TokenLayout {
     required this.descent,
     required this.fontSize,
     this.child,
+    this.child2,
+    this.numeratorX = 0,
+    this.denominatorX = 0,
+    this.numeratorRise = 0,
+    this.denominatorDrop = 0,
+    this.barRise = 0,
+    this.barStart = 0,
+    this.barWidth = 0,
+    this.leadPad = 0,
   });
 
   double get height => ascent + descent;
@@ -70,6 +106,13 @@ class ExpressionLayoutEngine {
   ExpressionLayoutEngine({required this.style, required this.rowHeight})
     : _baseFontSize = style.fontSize ?? rowHeight * 0.72,
       charWidth = _measureCharWidth(style, style.fontSize ?? rowHeight * 0.72);
+
+  /// Text-free engine in units of one row, for measuring heights only.
+  ExpressionLayoutEngine.forMeasuring()
+    : style = const TextStyle(),
+      rowHeight = 1.0,
+      charWidth = 0.6,
+      _baseFontSize = 0.72;
 
   static double _measureCharWidth(TextStyle style, double fontSize) {
     final tp = TextPainter(
@@ -113,6 +156,7 @@ class ExpressionLayoutEngine {
     bool smallText = false,
     EmptyStyle emptyStyle = EmptyStyle.none,
     BoxToken? cursorEndOwner,
+    FractionToken? leadArrowOwner,
   }) {
     final m = _metricsFor(smallText);
 
@@ -130,6 +174,7 @@ class ExpressionLayoutEngine {
             _EmptyBoxPlaceholderToken(),
             smallText,
             cursorEndOwner,
+            leadArrowOwner,
           );
           return ExpressionLayout(
             tokens: [placeholder],
@@ -146,7 +191,7 @@ class ExpressionLayoutEngine {
     double descent = m.descent;
 
     for (final token in tokens) {
-      final tl = _layoutToken(token, smallText, cursorEndOwner);
+      final tl = _layoutToken(token, smallText, cursorEndOwner, leadArrowOwner);
       layouts.add(tl);
       width += tl.width;
       if (tl.ascent > ascent) ascent = tl.ascent;
@@ -165,8 +210,52 @@ class ExpressionLayoutEngine {
     CalcToken token,
     bool smallText,
     BoxToken? cursorEndOwner,
+    FractionToken? leadArrowOwner,
   ) {
     final m = _metricsFor(smallText);
+
+    if (token is FractionToken) {
+      final top = layout(
+        token.numerator,
+        smallText: smallText,
+        emptyStyle: EmptyStyle.glyph,
+        cursorEndOwner: cursorEndOwner,
+        leadArrowOwner: leadArrowOwner,
+      );
+      final bottom = layout(
+        token.denominator,
+        smallText: smallText,
+        emptyStyle: EmptyStyle.glyph,
+        cursorEndOwner: cursorEndOwner,
+        leadArrowOwner: leadArrowOwner,
+      );
+
+      final gap = rowHeight * kFractionBarGap * m.scale;
+      final axis = rowHeight * kFractionAxis * m.scale;
+      final side = m.charWidth * kFractionSidePad;
+      final lead = identical(token, leadArrowOwner) ? m.charWidth : 0.0;
+
+      final inner = math.max(top.width, bottom.width);
+      final barWidth = inner + 2 * side;
+
+      return TokenLayout(
+        token: token,
+        width: lead + barWidth,
+        ascent: axis + gap + top.height,
+        descent: bottom.height + gap - axis,
+        fontSize: m.fontSize,
+        child: top,
+        child2: bottom,
+        numeratorX: lead + side + (inner - top.width) / 2,
+        denominatorX: lead + side + (inner - bottom.width) / 2,
+        numeratorRise: axis + gap + top.descent,
+        denominatorDrop: gap + bottom.ascent - axis,
+        barRise: axis,
+        barStart: lead,
+        barWidth: barWidth,
+        leadPad: lead,
+      );
+    }
 
     if (token is ExponentToken) {
       final child = layout(
@@ -174,6 +263,7 @@ class ExpressionLayoutEngine {
         smallText: true,
         emptyStyle: EmptyStyle.glyph,
         cursorEndOwner: cursorEndOwner,
+        leadArrowOwner: leadArrowOwner,
       );
       final raise = rowHeight * kSuperscriptRaise * m.scale;
 
@@ -193,6 +283,7 @@ class ExpressionLayoutEngine {
         smallText: smallText,
         emptyStyle: EmptyStyle.glyph,
         cursorEndOwner: cursorEndOwner,
+        leadArrowOwner: leadArrowOwner,
       );
       final tickWidth = m.charWidth * kRadicalTickWidth;
       final barGap = rowHeight * kRadicalBarGap * m.scale;

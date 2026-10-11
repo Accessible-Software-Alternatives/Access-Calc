@@ -6,6 +6,7 @@ import 'package:graphing_calculator/models/button_mode.dart';
 import 'package:graphing_calculator/models/calc_error.dart';
 import 'package:graphing_calculator/models/calc_menu.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
+import 'package:graphing_calculator/models/expression_layout.dart';
 import 'package:graphing_calculator/models/expression_parser.dart';
 
 class CalculatorBuffer extends ChangeNotifier {
@@ -121,6 +122,41 @@ class CalculatorBuffer extends ChangeNotifier {
   BoxToken? get currentBoxOwner =>
       _path.length > 1 ? _currentFrame.owner : null;
 
+  FractionToken? get fractionBeforeCursor {
+    if (!isOnEditableLine) return null;
+    final frame = _currentFrame;
+    final pos = _positionInFrame(frame);
+    if (pos.offset != 0 || pos.tokenIndex >= frame.tokens.length) return null;
+    final token = frame.tokens[pos.tokenIndex];
+    return token is FractionToken ? token : null;
+  }
+
+  int get _fractionDepth => _path.where((f) => f.owner is FractionToken).length;
+
+  int get _powerDepth => _path.where((f) => f.owner is ExponentToken).length;
+
+  int get _rootDepth => _path.where((f) => f.owner is RootToken).length;
+
+  bool get _canAddPower =>
+      _powerDepth < kMaxPowerDepth && _fitsAfterInsert(ExponentToken());
+
+  final ExpressionLayoutEngine _measureEngine =
+      ExpressionLayoutEngine.forMeasuring();
+
+  bool _fitsAfterInsert(CalcToken probe) {
+    final frame = _currentFrame;
+    final index = _positionInFrame(
+      frame,
+    ).tokenIndex.clamp(0, frame.tokens.length);
+    frame.tokens.insert(index, probe);
+    try {
+      final height = _measureEngine.layout(lines[cursorRow].tokens).height;
+      return height <= kMaxLineHeightRows;
+    } finally {
+      frame.tokens.removeAt(index);
+    }
+  }
+
   void _applyOverwrite(_CursorFrame frame) {
     if (!overwriteMode) return;
 
@@ -139,6 +175,8 @@ class CalculatorBuffer extends ChangeNotifier {
       } else {
         frame.tokens[pos.tokenIndex] = NumberToken(newValue);
       }
+    } else if (token is FractionToken) {
+      return;
     } else if (token is BoxToken) {
       frame.tokens.removeAt(pos.tokenIndex);
       frame.tokens.insertAll(pos.tokenIndex, token.children);
@@ -200,13 +238,6 @@ class CalculatorBuffer extends ChangeNotifier {
         ? tokens[pos.tokenIndex]
         : null;
 
-    // Typing digits right after an existing number always extends it,
-    // in both insert and overwrite mode - overwrite only ever replaces
-    // what's ahead of the cursor, and there's nothing ahead here that
-    // this keystroke is "on top of" in the way overtype means. Except:
-    // if there's a box (exponent/root) sitting right there, that takes
-    // priority - typing on top of it should replace *it*, not silently
-    // tack the digit onto whatever number happens to precede it.
     final isAfterNumber =
         pos.offset == 0 &&
         prevIndex >= 0 &&
@@ -261,6 +292,7 @@ class CalculatorBuffer extends ChangeNotifier {
   void insertExponent({bool overwrite = true}) {
     if (!isOnEditableLine) return;
 
+    if (!_canAddPower) return;
     _ensureLeftOperand();
     _insertBoxAndEnter(ExponentToken(), overwrite: overwrite);
   }
@@ -268,6 +300,7 @@ class CalculatorBuffer extends ChangeNotifier {
   void insertSquare() {
     if (!isOnEditableLine) return;
 
+    if (!_canAddPower) return;
     _ensureLeftOperand();
     insertToken(ExponentToken([NumberToken('2')]));
   }
@@ -275,6 +308,7 @@ class CalculatorBuffer extends ChangeNotifier {
   void insertReciprocal() {
     if (!isOnEditableLine) return;
 
+    if (!_canAddPower) return;
     _ensureLeftOperand();
     insertToken(ExponentToken([NumberToken('-1')]));
   }
@@ -314,6 +348,7 @@ class CalculatorBuffer extends ChangeNotifier {
   void insertPowerOfTen() {
     if (!isOnEditableLine) return;
 
+    if (!_canAddPower) return;
     insertToken(ConstantToken(ConstantType.ten));
     insertExponent(overwrite: false);
   }
@@ -329,7 +364,49 @@ class CalculatorBuffer extends ChangeNotifier {
   void insertRoot() {
     if (!isOnEditableLine) return;
 
+    if (_rootDepth >= kMaxRootDepth) return;
+    if (!_fitsAfterInsert(RootToken())) return;
     _insertBoxAndEnter(RootToken());
+  }
+
+  void insertFraction() {
+    if (!isOnEditableLine) return;
+    if (_fractionDepth >= kMaxFractionDepth) return;
+    if (!_fitsAfterInsert(FractionToken())) return;
+
+    _resetCursorBlink();
+
+    final frame = _currentFrame;
+    _applyOverwrite(frame);
+
+    final pos = _positionInFrame(frame);
+    final prevIndex = pos.tokenIndex - 1;
+    final hasNumberBefore =
+        pos.offset == 0 &&
+        prevIndex >= 0 &&
+        frame.tokens[prevIndex] is NumberToken;
+
+    if (!hasNumberBefore) {
+      frame.tokens.insert(pos.tokenIndex, FractionToken());
+      _path.add(
+        _CursorFrame(
+          (frame.tokens[pos.tokenIndex] as FractionToken).numerator,
+          0,
+          frame.tokens[pos.tokenIndex] as BoxToken,
+        ),
+      );
+      notifyListeners();
+      return;
+    }
+
+    final number = frame.tokens.removeAt(prevIndex) as NumberToken;
+    frame.column -= number.cursorLength;
+
+    final fraction = FractionToken([number]);
+    frame.tokens.insert(prevIndex, fraction);
+    _path.add(_CursorFrame(fraction.denominator, 0, fraction, 1));
+
+    notifyListeners();
   }
 
   void _insertBoxAndEnter(BoxToken box, {bool overwrite = true}) {
@@ -354,7 +431,16 @@ class CalculatorBuffer extends ChangeNotifier {
     final frame = _currentFrame;
 
     if (frame.column <= 0) {
-      if (_path.length > 1) {
+      final owner = frame.owner;
+      if (owner is FractionToken && frame.part == 1) {
+        _path[_path.length - 1] = _CursorFrame(
+          owner.numerator,
+          _frameEndColumn(owner.numerator),
+          owner,
+          0,
+        );
+        notifyListeners();
+      } else if (_path.length > 1) {
         _path.removeLast();
         notifyListeners();
       }
@@ -368,9 +454,20 @@ class CalculatorBuffer extends ChangeNotifier {
 
     if (token is BoxToken) {
       frame.column = frame.column - 1 - pos.offset;
-      _path.add(
-        _CursorFrame(token.children, _frameEndColumn(token.children), token),
-      );
+      if (token is FractionToken) {
+        _path.add(
+          _CursorFrame(
+            token.denominator,
+            _frameEndColumn(token.denominator),
+            token,
+            1,
+          ),
+        );
+      } else {
+        _path.add(
+          _CursorFrame(token.children, _frameEndColumn(token.children), token),
+        );
+      }
     } else if (_isAtomicBlock(token)) {
       frame.column = frame.column - 1 - pos.offset;
     } else {
@@ -388,6 +485,12 @@ class CalculatorBuffer extends ChangeNotifier {
     final frame = _currentFrame;
 
     if (frame.column >= _frameEndColumn(frame.tokens)) {
+      final owner = frame.owner;
+      if (owner is FractionToken && frame.part == 0) {
+        _path[_path.length - 1] = _CursorFrame(owner.denominator, 0, owner, 1);
+        notifyListeners();
+        return;
+      }
       if (_path.length > 1) {
         _path.removeLast();
         _currentFrame.column += 1;
@@ -413,8 +516,33 @@ class CalculatorBuffer extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _moveWithinFraction({required bool up}) {
+    if (!isOnEditableLine) return false;
+
+    for (int level = _path.length - 1; level >= 1; level--) {
+      final frame = _path[level];
+      final owner = frame.owner;
+      if (owner is! FractionToken) continue;
+      if (up ? frame.part == 0 : frame.part == 1) continue;
+
+      final target = up ? owner.numerator : owner.denominator;
+      final column = level == _path.length - 1
+          ? frame.column.clamp(0, _frameEndColumn(target))
+          : 0;
+      _path.removeRange(level, _path.length);
+      _path.add(_CursorFrame(target, column, owner, up ? 0 : 1));
+      return true;
+    }
+    return false;
+  }
+
   void moveUp() {
     _resetCursorBlink();
+
+    if (_moveWithinFraction(up: true)) {
+      notifyListeners();
+      return;
+    }
 
     if (cursorRow > 0) {
       _switchLine(cursorRow - 1);
@@ -425,6 +553,11 @@ class CalculatorBuffer extends ChangeNotifier {
 
   void moveDown() {
     _resetCursorBlink();
+
+    if (_moveWithinFraction(up: false)) {
+      notifyListeners();
+      return;
+    }
 
     if (cursorRow < lines.length - 1) {
       _switchLine(cursorRow + 1);
@@ -454,13 +587,13 @@ class CalculatorBuffer extends ChangeNotifier {
       final length = tokens[i].cursorLength;
 
       if (remaining < length) {
-        return CursorPosition(i, remaining);
+        return CursorPosition(i, remaining, frame.part);
       }
 
       remaining -= length;
     }
 
-    return CursorPosition(tokens.length, 0);
+    return CursorPosition(tokens.length, 0, frame.part);
   }
 
   int _frameEndColumn(List<CalcToken> tokens) =>
@@ -492,7 +625,7 @@ class CalculatorBuffer extends ChangeNotifier {
       return;
     }
 
-    if (_path.length > 1) {
+    if (_path.length > 1 && _currentFrame.tokens.isNotEmpty) {
       final frame = _currentFrame;
       frame.tokens.clear();
       frame.column = 0;
@@ -550,7 +683,11 @@ class CalculatorBuffer extends ChangeNotifier {
     final pos = _positionInFrame(frame);
 
     if (pos.tokenIndex >= tokens.length) {
-      if (_path.length > 1 && tokens.isEmpty) {
+      final owner = frame.owner;
+      final bothPartsEmpty =
+          owner is! FractionToken ||
+          (owner.numerator.isEmpty && owner.denominator.isEmpty);
+      if (_path.length > 1 && tokens.isEmpty && bothPartsEmpty) {
         _deleteEnclosingBox();
         notifyListeners();
       }
@@ -827,6 +964,12 @@ class CalculatorBuffer extends ChangeNotifier {
     if (token is RootToken) {
       return RootToken(token.children.map(_cloneToken).toList());
     }
+    if (token is FractionToken) {
+      return FractionToken(
+        token.numerator.map(_cloneToken).toList(),
+        token.denominator.map(_cloneToken).toList(),
+      );
+    }
     return token;
   }
 
@@ -888,7 +1031,11 @@ class CursorPosition {
   final int tokenIndex;
   final int offset;
 
-  const CursorPosition(this.tokenIndex, this.offset);
+  /// Which part of a two-part box (fraction) this frame is: 0 numerator,
+  /// 1 denominator.
+  final int part;
+
+  const CursorPosition(this.tokenIndex, this.offset, [this.part = 0]);
 }
 
 class _CursorFrame {
@@ -897,5 +1044,7 @@ class _CursorFrame {
 
   final BoxToken? owner;
 
-  _CursorFrame(this.tokens, this.column, [this.owner]);
+  final int part;
+
+  _CursorFrame(this.tokens, this.column, [this.owner, this.part = 0]);
 }

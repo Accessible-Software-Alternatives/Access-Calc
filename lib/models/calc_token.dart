@@ -29,6 +29,21 @@ class RootToken extends BoxToken {
   String get displayText => '√(${children.map((t) => t.displayText).join()})';
 }
 
+class FractionToken extends BoxToken {
+  final List<CalcToken> denominator;
+
+  FractionToken([List<CalcToken>? numerator, List<CalcToken>? denominator])
+    : denominator = denominator ?? [],
+      super(numerator ?? []);
+
+  List<CalcToken> get numerator => children;
+
+  @override
+  String get displayText =>
+      '(${children.map((t) => t.displayText).join()})÷'
+      '(${denominator.map((t) => t.displayText).join()})';
+}
+
 class NumberToken extends CalcToken {
   final String value;
 

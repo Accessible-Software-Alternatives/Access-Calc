@@ -384,8 +384,11 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.pushMenu(CalcMenus.math(buffer));
         break;
 
-      case ButtonAction.comma:
       case ButtonAction.fraction:
+        buffer.insertFraction();
+        break;
+
+      case ButtonAction.comma:
       case ButtonAction.vars:
       case ButtonAction.yEquals:
       case ButtonAction.window:

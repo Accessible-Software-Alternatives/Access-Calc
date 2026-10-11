@@ -130,6 +130,26 @@ class ExpressionParser {
       return ans;
     }
 
+    if (token is FractionToken) {
+      _pos++;
+      final top = ExpressionParser(
+        token.numerator,
+        variables: variables,
+        ans: ans,
+      ).parseExpression();
+      final bottom = ExpressionParser(
+        token.denominator,
+        variables: variables,
+        ans: ans,
+      ).parseExpression();
+
+      if (bottom == 0) {
+        throw DivideByZeroError(_pos - 1);
+      }
+
+      return top / bottom;
+    }
+
     if (token is RootToken) {
       _pos++;
       final arg = ExpressionParser(
