@@ -1,4 +1,6 @@
 import 'package:graphing_calculator/models/button_mode.dart';
+import 'package:graphing_calculator/models/calc_menu.dart';
+import 'package:graphing_calculator/models/calc_menus.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
 import 'package:graphing_calculator/models/calculator_buffer.dart';
 
@@ -187,18 +189,8 @@ class CalcButtonData {
 
 extension ButtonActionExecutor on ButtonAction {
   void execute(CalculatorBuffer buffer) {
-    if (buffer.error != null) {
-      switch (this) {
-        // will replace this with an actual menu navigation when the rest of the menu is implemented
-        case ButtonAction.digit1:
-          buffer.quitError();
-          break;
-        case ButtonAction.digit2:
-          buffer.gotoError();
-          break;
-        default:
-          break;
-      }
+    if (buffer.hasMenu && _routeToMenu(buffer)) {
+      _consumeShift(buffer);
       return;
     }
 
@@ -277,16 +269,16 @@ extension ButtonActionExecutor on ButtonAction {
         break;
 
       case ButtonAction.add:
-        buffer.insertToken(OperatorToken(OperatorType.add));
+        buffer.insertOperator(OperatorType.add);
         break;
       case ButtonAction.subtract:
-        buffer.insertToken(OperatorToken(OperatorType.subtract));
+        buffer.insertOperator(OperatorType.subtract);
         break;
       case ButtonAction.multiply:
-        buffer.insertToken(OperatorToken(OperatorType.multiply));
+        buffer.insertOperator(OperatorType.multiply);
         break;
       case ButtonAction.divide:
-        buffer.insertToken(OperatorToken(OperatorType.divide));
+        buffer.insertOperator(OperatorType.divide);
         break;
       case ButtonAction.power:
         buffer.insertExponent();
@@ -337,59 +329,25 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.insertReciprocal();
         break;
 
-      case ButtonAction.comma:
-      case ButtonAction.yEquals:
-      case ButtonAction.window:
-      case ButtonAction.zoom:
-      case ButtonAction.trace:
-      case ButtonAction.graph:
-      case ButtonAction.math:
-      case ButtonAction.apps:
-      case ButtonAction.prgm:
-      case ButtonAction.vars:
-      case ButtonAction.store:
-      case ButtonAction.mode:
-      case ButtonAction.xtheta:
-      case ButtonAction.stat:
-      case ButtonAction.on:
       case ButtonAction.tenToX:
-      case ButtonAction.eToX:
-      case ButtonAction.statPlot:
-      case ButtonAction.tblSet:
-      case ButtonAction.format:
-      case ButtonAction.calcMenu:
-      case ButtonAction.table:
-      case ButtonAction.quit:
-      case ButtonAction.link:
-      case ButtonAction.fraction:
-      case ButtonAction.list:
-      case ButtonAction.test:
-      case ButtonAction.angle:
-      case ButtonAction.draw:
-      case ButtonAction.distr:
-      case ButtonAction.matrix:
+        buffer.insertPowerOfTen();
+        break;
+
       case ButtonAction.piConst:
-      case ButtonAction.ee:
-      case ButtonAction.leftBrace:
-      case ButtonAction.rightBrace:
-      case ButtonAction.leftBracket:
-      case ButtonAction.rightBracket:
+        buffer.insertConstant(ConstantType.pi);
+        break;
       case ButtonAction.eConst:
-      case ButtonAction.rcl:
-      case ButtonAction.mem:
-      case ButtonAction.off:
-      case ButtonAction.catalog:
-      case ButtonAction.colon:
-      case ButtonAction.quotation:
-      case ButtonAction.space:
-      case ButtonAction.questionMark:
+        buffer.insertConstant(ConstantType.eulers);
+        break;
+
+      case ButtonAction.store:
+        buffer.insertStore();
+        break;
+
       case ButtonAction.ans:
-      case ButtonAction.entry:
-      case ButtonAction.f1:
-      case ButtonAction.f2:
-      case ButtonAction.f3:
-      case ButtonAction.f4:
-      case ButtonAction.f5:
+        buffer.insertAns();
+        break;
+
       case ButtonAction.letterA:
       case ButtonAction.letterB:
       case ButtonAction.letterC:
@@ -416,6 +374,63 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.letterX:
       case ButtonAction.letterY:
       case ButtonAction.letterZ:
+        buffer.insertVariable(name.substring('letter'.length).toUpperCase());
+        break;
+      case ButtonAction.theta:
+        buffer.insertVariable('θ');
+        break;
+
+      case ButtonAction.math:
+        buffer.pushMenu(CalcMenus.math(buffer));
+        break;
+
+      case ButtonAction.comma:
+      case ButtonAction.fraction:
+      case ButtonAction.vars:
+      case ButtonAction.yEquals:
+      case ButtonAction.window:
+      case ButtonAction.zoom:
+      case ButtonAction.trace:
+      case ButtonAction.graph:
+      case ButtonAction.apps:
+      case ButtonAction.prgm:
+      case ButtonAction.mode:
+      case ButtonAction.xtheta:
+      case ButtonAction.stat:
+      case ButtonAction.on:
+      case ButtonAction.eToX:
+      case ButtonAction.statPlot:
+      case ButtonAction.tblSet:
+      case ButtonAction.format:
+      case ButtonAction.calcMenu:
+      case ButtonAction.table:
+      case ButtonAction.quit:
+      case ButtonAction.link:
+      case ButtonAction.list:
+      case ButtonAction.test:
+      case ButtonAction.angle:
+      case ButtonAction.draw:
+      case ButtonAction.distr:
+      case ButtonAction.matrix:
+      case ButtonAction.ee:
+      case ButtonAction.leftBrace:
+      case ButtonAction.rightBrace:
+      case ButtonAction.leftBracket:
+      case ButtonAction.rightBracket:
+      case ButtonAction.rcl:
+      case ButtonAction.mem:
+      case ButtonAction.off:
+      case ButtonAction.catalog:
+      case ButtonAction.colon:
+      case ButtonAction.quotation:
+      case ButtonAction.space:
+      case ButtonAction.questionMark:
+      case ButtonAction.entry:
+      case ButtonAction.f1:
+      case ButtonAction.f2:
+      case ButtonAction.f3:
+      case ButtonAction.f4:
+      case ButtonAction.f5:
       case ButtonAction.letteru:
       case ButtonAction.letterv:
       case ButtonAction.letterw:
@@ -425,7 +440,6 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.l4:
       case ButtonAction.l5:
       case ButtonAction.l6:
-      case ButtonAction.theta:
       case ButtonAction.imaginaryUnit:
       case ButtonAction.solve:
         // TODO
@@ -438,6 +452,48 @@ extension ButtonActionExecutor on ButtonAction {
     }
 
     _consumeShift(buffer);
+  }
+}
+
+extension _MenuRouting on ButtonAction {
+  bool _routeToMenu(CalculatorBuffer buffer) {
+    switch (this) {
+      case ButtonAction.up:
+        return buffer.handleMenuKey(MenuKey.up);
+      case ButtonAction.down:
+        return buffer.handleMenuKey(MenuKey.down);
+      case ButtonAction.left:
+        return buffer.handleMenuKey(MenuKey.left);
+      case ButtonAction.right:
+        return buffer.handleMenuKey(MenuKey.right);
+      case ButtonAction.enter:
+        return buffer.handleMenuKey(MenuKey.enter);
+      case ButtonAction.clear:
+      case ButtonAction.quit:
+        return buffer.handleMenuKey(MenuKey.cancel);
+
+      case ButtonAction.second:
+      case ButtonAction.alpha:
+        return false;
+
+      default:
+        final selector = _menuSelector;
+        if (selector == null) return false;
+        return buffer.handleMenuKey(MenuKey.selector, selector: selector);
+    }
+  }
+
+  String? get _menuSelector {
+    final label = name;
+
+    if (label.startsWith('digit')) {
+      return label.substring('digit'.length);
+    }
+    if (label.startsWith('letter') && label.length == 'letter'.length + 1) {
+      return label.substring('letter'.length).toUpperCase();
+    }
+
+    return null;
   }
 }
 

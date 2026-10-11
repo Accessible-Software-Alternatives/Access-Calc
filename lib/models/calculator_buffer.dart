@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:graphing_calculator/models/button_mode.dart';
 import 'package:graphing_calculator/models/calc_error.dart';
+import 'package:graphing_calculator/models/calc_menu.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
 import 'package:graphing_calculator/models/expression_parser.dart';
 
@@ -14,6 +15,8 @@ class CalculatorBuffer extends ChangeNotifier {
 
   static const int visibleLineCount = 10;
 
+  static const int displayColumns = 26;
+
   Timer? _cursorTimer;
 
   bool cursorVisible = true;
@@ -22,8 +25,68 @@ class CalculatorBuffer extends ChangeNotifier {
 
   bool overwriteMode = true;
 
+  final Map<String, double> variables = {};
+
+  double lastAnswer = 0;
+
   CalcError? error;
   List<CalcToken>? _erroredTokens;
+
+  final List<CalcMenu> menuStack = [];
+
+  CalcMenu? get activeMenu => menuStack.isEmpty ? null : menuStack.last;
+
+  bool get hasMenu => menuStack.isNotEmpty;
+
+  void pushMenu(CalcMenu menu) {
+    menuStack.add(menu);
+    notifyListeners();
+  }
+
+  void popMenu() {
+    if (menuStack.isEmpty) return;
+    menuStack.removeLast();
+    notifyListeners();
+  }
+
+  void closeMenus() {
+    if (menuStack.isEmpty) return;
+    menuStack.clear();
+    notifyListeners();
+  }
+
+  bool handleMenuKey(MenuKey key, {String? selector}) {
+    final menu = activeMenu;
+    if (menu == null) return false;
+
+    switch (key) {
+      case MenuKey.up:
+        menu.moveUp();
+        break;
+      case MenuKey.down:
+        menu.moveDown();
+        break;
+      case MenuKey.left:
+        menu.previousPage();
+        break;
+      case MenuKey.right:
+        menu.nextPage();
+        break;
+      case MenuKey.enter:
+        menu.activateSelection();
+        break;
+      case MenuKey.cancel:
+        menu.cancel();
+        break;
+      case MenuKey.selector:
+        if (selector == null) return false;
+        if (!menu.activateSelector(selector)) return false;
+        break;
+    }
+
+    notifyListeners();
+    return true;
+  }
 
   late List<_CursorFrame> _path;
 
@@ -84,7 +147,7 @@ class CalculatorBuffer extends ChangeNotifier {
     }
   }
 
-  void insertToken(CalcToken token) {
+  void insertToken(CalcToken token, {bool overwrite = true}) {
     if (!isOnEditableLine) {
       return;
     }
@@ -92,7 +155,7 @@ class CalculatorBuffer extends ChangeNotifier {
     _resetCursorBlink();
 
     final frame = _currentFrame;
-    _applyOverwrite(frame);
+    if (overwrite) _applyOverwrite(frame);
 
     final tokens = frame.tokens;
     final pos = _positionInFrame(frame);
@@ -137,6 +200,13 @@ class CalculatorBuffer extends ChangeNotifier {
         ? tokens[pos.tokenIndex]
         : null;
 
+    // Typing digits right after an existing number always extends it,
+    // in both insert and overwrite mode - overwrite only ever replaces
+    // what's ahead of the cursor, and there's nothing ahead here that
+    // this keystroke is "on top of" in the way overtype means. Except:
+    // if there's a box (exponent/root) sitting right there, that takes
+    // priority - typing on top of it should replace *it*, not silently
+    // tack the digit onto whatever number happens to precede it.
     final isAfterNumber =
         pos.offset == 0 &&
         prevIndex >= 0 &&
@@ -188,22 +258,72 @@ class CalculatorBuffer extends ChangeNotifier {
     notifyListeners();
   }
 
-  void insertExponent() {
+  void insertExponent({bool overwrite = true}) {
     if (!isOnEditableLine) return;
 
-    _insertBoxAndEnter(ExponentToken());
+    _ensureLeftOperand();
+    _insertBoxAndEnter(ExponentToken(), overwrite: overwrite);
   }
 
   void insertSquare() {
     if (!isOnEditableLine) return;
 
+    _ensureLeftOperand();
     insertToken(ExponentToken([NumberToken('2')]));
   }
 
   void insertReciprocal() {
     if (!isOnEditableLine) return;
 
+    _ensureLeftOperand();
     insertToken(ExponentToken([NumberToken('-1')]));
+  }
+
+  void insertConstant(ConstantType type) {
+    if (!isOnEditableLine) return;
+
+    insertToken(ConstantToken(type));
+  }
+
+  void insertVariable(String name) {
+    if (!isOnEditableLine) return;
+
+    insertToken(VariableToken(name));
+  }
+
+  void insertAns() {
+    if (!isOnEditableLine) return;
+
+    insertToken(AnsToken());
+  }
+
+  void insertOperator(OperatorType type) {
+    if (!isOnEditableLine) return;
+
+    _ensureLeftOperand();
+    insertToken(OperatorToken(type));
+  }
+
+  void insertStore() {
+    if (!isOnEditableLine) return;
+
+    _ensureLeftOperand();
+    insertToken(StoreToken());
+  }
+
+  void insertPowerOfTen() {
+    if (!isOnEditableLine) return;
+
+    insertToken(ConstantToken(ConstantType.ten));
+    insertExponent(overwrite: false);
+  }
+
+  void _ensureLeftOperand() {
+    final pos = _positionInFrame(_currentFrame);
+
+    if (pos.tokenIndex > 0 || pos.offset > 0) return;
+
+    insertToken(AnsToken(), overwrite: false);
   }
 
   void insertRoot() {
@@ -212,11 +332,11 @@ class CalculatorBuffer extends ChangeNotifier {
     _insertBoxAndEnter(RootToken());
   }
 
-  void _insertBoxAndEnter(BoxToken box) {
+  void _insertBoxAndEnter(BoxToken box, {bool overwrite = true}) {
     _resetCursorBlink();
 
     final frame = _currentFrame;
-    _applyOverwrite(frame);
+    if (overwrite) _applyOverwrite(frame);
 
     final pos = _positionInFrame(frame);
     frame.tokens.insert(pos.tokenIndex, box);
@@ -363,6 +483,7 @@ class CalculatorBuffer extends ChangeNotifier {
     if (error != null) {
       error = null;
       _erroredTokens = null;
+      menuStack.clear();
     }
 
     if (!isOnEditableLine) {
@@ -525,13 +646,75 @@ class CalculatorBuffer extends ChangeNotifier {
       lines.add(CalcLine(stringToTokens('Error'), isResult: true));
       lines.add(CalcLine([]));
       error = calcError;
+      pushMenu(_buildErrorMenu(calcError));
     }
   }
 
+  CalcMenu _buildErrorMenu(CalcError calcError) {
+    return CalcMenu(
+      heading: 'ERROR: ${calcError.title}',
+      body: wrapMenuText(calcError.message, displayColumns),
+      pages: [
+        const MenuPage('ERROR', [MenuItem('Quit'), MenuItem('Goto')]),
+      ],
+      onSelect: (menu, _, itemIndex) {
+        if (itemIndex == 0) {
+          quitError();
+        } else {
+          gotoError();
+        }
+      },
+      onCancel: (_) => quitError(),
+    );
+  }
+
   String _evaluate(List<CalcToken> tokens) {
-    final parser = ExpressionParser(tokens);
-    final result = parser.parseExpression();
-    return _formatResult(result, tokens.length);
+    final storeIndex = tokens.indexWhere((t) => t is StoreToken);
+
+    if (storeIndex >= 0) {
+      return _evaluateStore(tokens, storeIndex);
+    }
+
+    final result = ExpressionParser(
+      tokens,
+      variables: variables,
+      ans: lastAnswer,
+    ).parseExpression();
+
+    final formatted = _formatResult(result, tokens.length);
+    _recordAnswer(result);
+    return formatted;
+  }
+
+  void _recordAnswer(double value) {
+    if (!value.isNaN) lastAnswer = value;
+  }
+
+  String _evaluateStore(List<CalcToken> tokens, int storeIndex) {
+    final target = tokens.length == storeIndex + 2
+        ? tokens[storeIndex + 1]
+        : null;
+
+    if (target is! VariableToken) {
+      throw SyntaxError(storeIndex + 1);
+    }
+
+    final source = tokens.sublist(0, storeIndex);
+    if (source.isEmpty) {
+      throw SyntaxError(storeIndex);
+    }
+
+    final value = ExpressionParser(
+      source,
+      variables: variables,
+      ans: lastAnswer,
+    ).parseExpression();
+
+    final formatted = _formatResult(value, storeIndex);
+    variables[target.name] = value;
+    _recordAnswer(value);
+
+    return formatted;
   }
 
   static const int _maxResultChars = 15;
@@ -609,6 +792,7 @@ class CalculatorBuffer extends ChangeNotifier {
     if (error == null) return;
     error = null;
     _erroredTokens = null;
+    menuStack.clear();
     notifyListeners();
   }
 
@@ -619,6 +803,7 @@ class CalculatorBuffer extends ChangeNotifier {
     final tokenIndex = error!.tokenIndex;
     error = null;
     _erroredTokens = null;
+    menuStack.clear();
 
     if (tokens != null) {
       final editableLine = lines.last;

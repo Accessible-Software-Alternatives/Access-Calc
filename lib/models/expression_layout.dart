@@ -82,9 +82,6 @@ class ExpressionLayoutEngine {
     return tp.width;
   }
 
-  double get leafAscent => _metricsFor(false).ascent;
-  double get leafDescent => _metricsFor(false).descent;
-
   double get baseFontSize => _baseFontSize;
 
   _Metrics _metricsFor(bool smallText) {

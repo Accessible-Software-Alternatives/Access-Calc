@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 abstract class CalcToken {
   String get displayText;
 
@@ -34,6 +36,68 @@ class NumberToken extends CalcToken {
 
   @override
   String get displayText => value;
+}
+
+enum ConstantType { pi, eulers, ten }
+
+class ConstantToken extends CalcToken {
+  final ConstantType type;
+
+  ConstantToken(this.type);
+
+  double get value {
+    switch (type) {
+      case ConstantType.pi:
+        return math.pi;
+      case ConstantType.eulers:
+        return math.e;
+      case ConstantType.ten:
+        return 10;
+    }
+  }
+
+  @override
+  String get displayText {
+    switch (type) {
+      case ConstantType.pi:
+        return 'π';
+      case ConstantType.eulers:
+        return 'e';
+      case ConstantType.ten:
+        return '10';
+    }
+  }
+
+  @override
+  int get cursorLength => 1;
+}
+
+class VariableToken extends CalcToken {
+  final String name;
+
+  VariableToken(this.name);
+
+  @override
+  String get displayText => name;
+
+  @override
+  int get cursorLength => 1;
+}
+
+class AnsToken extends CalcToken {
+  @override
+  String get displayText => 'Ans';
+
+  @override
+  int get cursorLength => 1;
+}
+
+class StoreToken extends CalcToken {
+  @override
+  String get displayText => '→';
+
+  @override
+  int get cursorLength => 1;
 }
 
 enum OperatorType { add, subtract, multiply, divide, power }

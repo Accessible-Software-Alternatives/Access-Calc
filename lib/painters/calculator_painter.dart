@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:graphing_calculator/models/button_mode.dart';
-import 'package:graphing_calculator/models/calc_error.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
 import 'package:graphing_calculator/models/calculator_buffer.dart';
 import 'package:graphing_calculator/models/expression_layout.dart';
-import 'package:graphing_calculator/widgets/text_grid.dart';
+import 'package:graphing_calculator/painters/menu_painter.dart';
 
 class CalculatorPainter extends CustomPainter {
   final CalculatorBuffer buffer;
 
   CalculatorPainter({required this.buffer});
 
-  static const int columns = 26;
+  static const int columns = CalculatorBuffer.displayColumns;
 
   static const double _rowsOnScreen = 7;
 
@@ -19,18 +18,26 @@ class CalculatorPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final errorRowHeight = size.height / CalculatorBuffer.visibleLineCount;
+    final menuRowHeight = size.height / CalculatorBuffer.visibleLineCount;
 
-    final errorTextStyle = TextStyle(
+    final menuTextStyle = TextStyle(
       fontFamily: 'Courier',
-      fontSize: errorRowHeight * 0.75,
+      fontSize: menuRowHeight * 0.75,
       color: Colors.black,
       fontWeight: FontWeight.w600,
       height: 1,
     );
 
-    if (buffer.error != null) {
-      _paintError(canvas, size, errorTextStyle, buffer.error!);
+    final menu = buffer.activeMenu;
+    if (menu != null) {
+      MenuPainter.paint(
+        canvas: canvas,
+        size: size,
+        menu: menu,
+        textStyle: menuTextStyle,
+        columns: columns,
+        visibleRows: CalculatorBuffer.visibleLineCount,
+      );
       return;
     }
 
@@ -283,6 +290,7 @@ class CalculatorPainter extends CustomPainter {
       final trailingPad = charWidth * kRadicalTrailingPad;
       final barGap = rowHeight * kRadicalBarGap * scale;
       final barY = baselineY - tl.child!.ascent - barGap * 0.35;
+
       final barWidth = tl.width - tickWidth - trailingPad;
 
       final tickPaint = Paint()
@@ -353,9 +361,48 @@ class CalculatorPainter extends CustomPainter {
     final rect = Rect.fromLTWH(
       located.x,
       located.baselineY - leaf.ascent,
-      leaf.charWidth,
+      located.width ?? leaf.charWidth,
       leaf.ascent + leaf.descent,
     );
+
+    String? modeSymbol;
+    switch (buffer.mode) {
+      case ButtonMode.normal:
+        modeSymbol = null;
+        break;
+      case ButtonMode.second:
+        modeSymbol = '↑';
+        break;
+      case ButtonMode.alpha:
+      case ButtonMode.alphaLock:
+        modeSymbol = 'A';
+        break;
+    }
+
+    if (modeSymbol != null) {
+      canvas.drawRect(rect, Paint()..color = Colors.black);
+
+      final glyph = TextPainter(
+        text: TextSpan(
+          text: modeSymbol,
+          style: TextStyle(
+            color: _highlightTextColor,
+            fontWeight: FontWeight.bold,
+            fontSize: leaf.fontSize,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      glyph.paint(
+        canvas,
+        Offset(
+          rect.center.dx - glyph.width / 2,
+          rect.center.dy - glyph.height / 2,
+        ),
+      );
+      return;
+    }
 
     final showExitArrow =
         buffer.currentBoxOwner is RootToken && buffer.isAtEndOfCurrentBox;
@@ -388,39 +435,6 @@ class CalculatorPainter extends CustomPainter {
         Paint()..color = Colors.black,
       );
     }
-
-    String? symbol;
-    switch (buffer.mode) {
-      case ButtonMode.normal:
-        symbol = null;
-        break;
-      case ButtonMode.second:
-        symbol = '↑';
-        break;
-      case ButtonMode.alpha:
-      case ButtonMode.alphaLock:
-        symbol = 'A';
-        break;
-    }
-
-    if (symbol == null) return;
-
-    final tp = TextPainter(
-      text: TextSpan(
-        text: symbol,
-        style: TextStyle(
-          color: _highlightTextColor,
-          fontWeight: FontWeight.bold,
-          fontSize: engine.rowHeight * 0.9,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    tp.paint(
-      canvas,
-      Offset(rect.center.dx - tp.width / 2, rect.top - tp.height),
-    );
   }
 
   _CursorLocation? _locateCursor({
@@ -444,7 +458,23 @@ class CalculatorPainter extends CustomPainter {
 
     if (level == path.length - 1) {
       x += pos.offset * leaf.charWidth;
-      return _CursorLocation(x: x, baselineY: baselineY, smallText: smallText);
+
+      double? width;
+      if (pos.tokenIndex < expr.tokens.length) {
+        final under = expr.tokens[pos.tokenIndex];
+        if (under.token is! BoxToken &&
+            under.token.cursorLength == 1 &&
+            under.token.displayText.length > 1) {
+          width = under.width;
+        }
+      }
+
+      return _CursorLocation(
+        x: x,
+        baselineY: baselineY,
+        smallText: smallText,
+        width: width,
+      );
     }
 
     if (pos.tokenIndex >= expr.tokens.length) return null;
@@ -478,94 +508,6 @@ class CalculatorPainter extends CustomPainter {
     );
   }
 
-  void _paintError(
-    Canvas canvas,
-    Size size,
-    TextStyle textStyle,
-    CalcError error,
-  ) {
-    const visibleRows = CalculatorBuffer.visibleLineCount;
-    final cellHeight = size.height / visibleRows;
-    final cellWidth = size.width / columns;
-
-    var row = 0;
-    final title = 'ERROR: ${error.title}';
-
-    TextGrid.drawRow(
-      canvas: canvas,
-      size: size,
-      row: row,
-      text: title,
-      style: textStyle,
-      columns: columns,
-      visibleRows: visibleRows,
-    );
-
-    canvas.drawRect(
-      Rect.fromLTWH(0, (row + 1) * cellHeight - 2, title.length * cellWidth, 2),
-      Paint()..color = Colors.black,
-    );
-
-    row += 2;
-    _drawMenuOption(canvas, size, textStyle, row, '1', 'Quit');
-    row++;
-    _drawMenuOption(canvas, size, textStyle, row, '2', 'Goto');
-    row += 2;
-
-    for (final line in error.message.split('\n')) {
-      TextGrid.drawRow(
-        canvas: canvas,
-        size: size,
-        row: row,
-        text: line,
-        style: textStyle,
-        columns: columns,
-        visibleRows: visibleRows,
-      );
-      row++;
-    }
-  }
-
-  void _drawMenuOption(
-    Canvas canvas,
-    Size size,
-    TextStyle textStyle,
-    int row,
-    String number,
-    String label,
-  ) {
-    TextGrid.drawHighlight(
-      canvas: canvas,
-      size: size,
-      row: row,
-      startCol: 0,
-      width: 1,
-      columns: columns,
-      visibleRows: CalculatorBuffer.visibleLineCount,
-    );
-
-    TextGrid.drawRow(
-      canvas: canvas,
-      size: size,
-      row: row,
-      text: number,
-      style: textStyle.copyWith(color: const Color(0xFFD8E0C8)),
-      columns: columns,
-      visibleRows: CalculatorBuffer.visibleLineCount,
-    );
-
-    TextGrid.drawRow(
-      canvas: canvas,
-      size: size,
-      row: row,
-      text: ':$label',
-      style: textStyle,
-      columns: columns,
-      visibleRows: CalculatorBuffer.visibleLineCount,
-      startCol: 1,
-    );
-  }
-
   @override
   bool shouldRepaint(covariant CalculatorPainter oldDelegate) {
     return true;
@@ -585,9 +527,15 @@ class _CursorLocation {
   final double baselineY;
   final bool smallText;
 
+  /// Width the cursor should cover. Normally one character, but an atomic
+  /// multi-character token (a constant like "10", which the cursor can't
+  /// step inside of) is covered in full.
+  final double? width;
+
   _CursorLocation({
     required this.x,
     required this.baselineY,
     required this.smallText,
+    this.width,
   });
 }

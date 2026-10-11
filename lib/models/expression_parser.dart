@@ -5,9 +5,14 @@ import 'package:graphing_calculator/models/calc_token.dart';
 
 class ExpressionParser {
   final List<CalcToken> tokens;
+
+  final Map<String, double> variables;
+
+  final double ans;
+
   int _pos = 0;
 
-  ExpressionParser(this.tokens);
+  ExpressionParser(this.tokens, {this.variables = const {}, this.ans = 0});
 
   CalcToken? get _current => _pos < tokens.length ? tokens[_pos] : null;
 
@@ -51,7 +56,6 @@ class ExpressionParser {
   }
 
   double _parsePower() {
-    // Most calculators make the leading negative sign apply after the power which I don't completely get
     final leading = _current;
     bool negate = false;
     double base;
@@ -73,7 +77,11 @@ class ExpressionParser {
       if (_current is ExponentToken) {
         final exponent = _current as ExponentToken;
         _pos++;
-        final exp = ExpressionParser(exponent.children).parseExpression();
+        final exp = ExpressionParser(
+          exponent.children,
+          variables: variables,
+          ans: ans,
+        ).parseExpression();
         base = math.pow(base, exp).toDouble();
         continue;
       }
@@ -107,9 +115,28 @@ class ExpressionParser {
       return result;
     }
 
+    if (token is ConstantToken) {
+      _pos++;
+      return token.value;
+    }
+
+    if (token is VariableToken) {
+      _pos++;
+      return variables[token.name] ?? 0;
+    }
+
+    if (token is AnsToken) {
+      _pos++;
+      return ans;
+    }
+
     if (token is RootToken) {
       _pos++;
-      final arg = ExpressionParser(token.children).parseExpression();
+      final arg = ExpressionParser(
+        token.children,
+        variables: variables,
+        ans: ans,
+      ).parseExpression();
 
       if (arg < 0) {
         throw NonrealAnswersError(_pos - 1);
