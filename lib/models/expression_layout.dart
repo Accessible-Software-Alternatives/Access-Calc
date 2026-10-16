@@ -107,7 +107,6 @@ class ExpressionLayoutEngine {
     : _baseFontSize = style.fontSize ?? rowHeight * 0.72,
       charWidth = _measureCharWidth(style, style.fontSize ?? rowHeight * 0.72);
 
-  /// Text-free engine in units of one row, for measuring heights only.
   ExpressionLayoutEngine.forMeasuring()
     : style = const TextStyle(),
       rowHeight = 1.0,

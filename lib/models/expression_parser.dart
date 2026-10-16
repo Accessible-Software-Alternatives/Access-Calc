@@ -35,14 +35,21 @@ class ExpressionParser {
   double _parseTerm() {
     var result = _parsePower();
 
-    while (_current is OperatorToken) {
-      final op = _current as OperatorToken;
-      if (op.type != OperatorType.multiply && op.type != OperatorType.divide) {
-        break;
-      }
-      _pos++;
+    while (true) {
+      final current = _current;
+      final OperatorToken? op =
+          (current is OperatorToken &&
+              (current.type == OperatorType.multiply ||
+                  current.type == OperatorType.divide))
+          ? current
+          : null;
+
+      if (op == null && !_startsOperand(current)) break;
+
+      if (op != null) _pos++;
       final right = _parsePower();
-      if (op.type == OperatorType.divide) {
+
+      if (op != null && op.type == OperatorType.divide) {
         if (right == 0) {
           throw DivideByZeroError(_pos);
         }
@@ -53,6 +60,17 @@ class ExpressionParser {
     }
 
     return result;
+  }
+
+  bool _startsOperand(CalcToken? token) {
+    return token is NumberToken ||
+        token is ConstantToken ||
+        token is VariableToken ||
+        token is AnsToken ||
+        token is RootToken ||
+        token is FractionToken ||
+        token is FunctionToken ||
+        token is LeftParenToken;
   }
 
   double _parsePower() {

@@ -372,41 +372,149 @@ class CalculatorBuffer extends ChangeNotifier {
   void insertFraction() {
     if (!isOnEditableLine) return;
     if (_fractionDepth >= kMaxFractionDepth) return;
-    if (!_fitsAfterInsert(FractionToken())) return;
 
     _resetCursorBlink();
 
     final frame = _currentFrame;
+    final backupTokens = List<CalcToken>.of(frame.tokens);
+    final backupColumn = frame.column;
+
     _applyOverwrite(frame);
+    _splitNumberAtCursor(frame);
 
     final pos = _positionInFrame(frame);
-    final prevIndex = pos.tokenIndex - 1;
-    final hasNumberBefore =
-        pos.offset == 0 &&
-        prevIndex >= 0 &&
-        frame.tokens[prevIndex] is NumberToken;
+    final grabbed = pos.offset == 0
+        ? _grabOperand(frame.tokens, pos.tokenIndex)
+        : null;
 
-    if (!hasNumberBefore) {
-      frame.tokens.insert(pos.tokenIndex, FractionToken());
-      _path.add(
-        _CursorFrame(
-          (frame.tokens[pos.tokenIndex] as FractionToken).numerator,
-          0,
-          frame.tokens[pos.tokenIndex] as BoxToken,
-        ),
-      );
-      notifyListeners();
+    final fraction = FractionToken(grabbed?.tokens);
+    var insertAt = pos.tokenIndex;
+
+    if (grabbed != null) {
+      var removedColumns = 0;
+      for (int i = grabbed.start; i < pos.tokenIndex; i++) {
+        removedColumns += frame.tokens[i].cursorLength;
+      }
+      frame.tokens.removeRange(grabbed.start, pos.tokenIndex);
+      frame.column -= removedColumns;
+      insertAt = grabbed.start;
+    }
+    frame.tokens.insert(insertAt, fraction);
+
+    final fits =
+        _fractionDepth + _fractionNesting(fraction) <= kMaxFractionDepth &&
+        _measureEngine.layout(lines[cursorRow].tokens).height <=
+            kMaxLineHeightRows;
+
+    if (!fits) {
+      frame.tokens
+        ..clear()
+        ..addAll(backupTokens);
+      frame.column = backupColumn;
       return;
     }
 
-    final number = frame.tokens.removeAt(prevIndex) as NumberToken;
-    frame.column -= number.cursorLength;
-
-    final fraction = FractionToken([number]);
-    frame.tokens.insert(prevIndex, fraction);
-    _path.add(_CursorFrame(fraction.denominator, 0, fraction, 1));
+    _path.add(
+      grabbed != null
+          ? _CursorFrame(fraction.denominator, 0, fraction, 1)
+          : _CursorFrame(fraction.numerator, 0, fraction),
+    );
 
     notifyListeners();
+  }
+
+  void _splitNumberAtCursor(_CursorFrame frame) {
+    final pos = _positionInFrame(frame);
+    if (pos.offset == 0 || pos.tokenIndex >= frame.tokens.length) return;
+
+    final token = frame.tokens[pos.tokenIndex];
+    if (token is! NumberToken) return;
+
+    frame.tokens
+      ..removeAt(pos.tokenIndex)
+      ..insert(pos.tokenIndex, NumberToken(token.value.substring(pos.offset)))
+      ..insert(
+        pos.tokenIndex,
+        NumberToken(token.value.substring(0, pos.offset)),
+      );
+  }
+
+  int _fractionNesting(CalcToken token) {
+    if (token is FractionToken) {
+      var deepest = 0;
+      for (final t in [...token.numerator, ...token.denominator]) {
+        deepest = math.max(deepest, _fractionNesting(t));
+      }
+      return 1 + deepest;
+    }
+    if (token is BoxToken) {
+      var deepest = 0;
+      for (final t in token.children) {
+        deepest = math.max(deepest, _fractionNesting(t));
+      }
+      return deepest;
+    }
+    return 0;
+  }
+
+  ({int start, List<CalcToken> tokens})? _grabOperand(
+    List<CalcToken> tokens,
+    int end,
+  ) {
+    var start = end;
+    while (true) {
+      final next = _factorStart(tokens, start);
+      if (next == null) break;
+      start = next;
+    }
+    if (start == end) return null;
+
+    var grabbed = tokens.sublist(start, end);
+
+    if (grabbed.length >= 2 &&
+        grabbed.first is LeftParenToken &&
+        grabbed.last is RightParenToken &&
+        _matchingOpen(tokens, end - 1) == start) {
+      grabbed = grabbed.sublist(1, grabbed.length - 1);
+    }
+
+    return (start: start, tokens: grabbed);
+  }
+
+  int? _factorStart(List<CalcToken> tokens, int end) {
+    final i = end - 1;
+    if (i < 0) return null;
+    final token = tokens[i];
+
+    if (token is ExponentToken) {
+      return _factorStart(tokens, i) ?? i;
+    }
+    if (token is RightParenToken) {
+      return _matchingOpen(tokens, i);
+    }
+    if (token is NumberToken ||
+        token is ConstantToken ||
+        token is VariableToken ||
+        token is AnsToken ||
+        token is RootToken ||
+        token is FractionToken) {
+      return i;
+    }
+    return null;
+  }
+
+  int? _matchingOpen(List<CalcToken> tokens, int closeIndex) {
+    var depth = 0;
+    for (int j = closeIndex; j >= 0; j--) {
+      final t = tokens[j];
+      if (t is RightParenToken) {
+        depth++;
+      } else if (t is LeftParenToken || t is FunctionToken) {
+        depth--;
+        if (depth == 0) return j;
+      }
+    }
+    return null;
   }
 
   void _insertBoxAndEnter(BoxToken box, {bool overwrite = true}) {
@@ -414,6 +522,7 @@ class CalculatorBuffer extends ChangeNotifier {
 
     final frame = _currentFrame;
     if (overwrite) _applyOverwrite(frame);
+    _splitNumberAtCursor(frame);
 
     final pos = _positionInFrame(frame);
     frame.tokens.insert(pos.tokenIndex, box);
@@ -1031,8 +1140,6 @@ class CursorPosition {
   final int tokenIndex;
   final int offset;
 
-  /// Which part of a two-part box (fraction) this frame is: 0 numerator,
-  /// 1 denominator.
   final int part;
 
   const CursorPosition(this.tokenIndex, this.offset, [this.part = 0]);
