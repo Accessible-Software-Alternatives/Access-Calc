@@ -29,7 +29,7 @@ const int kMaxPowerDepth = 4;
 
 const int kMaxRootDepth = 4;
 
-const double kMaxLineHeightRows = 12.5;
+const double kMaxLineHeightRows = 8.5;
 
 class TokenLayout {
   final CalcToken token;
@@ -216,14 +216,14 @@ class ExpressionLayoutEngine {
     if (token is FractionToken) {
       final top = layout(
         token.numerator,
-        smallText: smallText,
+        smallText: true,
         emptyStyle: EmptyStyle.glyph,
         cursorEndOwner: cursorEndOwner,
         leadArrowOwner: leadArrowOwner,
       );
       final bottom = layout(
         token.denominator,
-        smallText: smallText,
+        smallText: true,
         emptyStyle: EmptyStyle.glyph,
         cursorEndOwner: cursorEndOwner,
         leadArrowOwner: leadArrowOwner,

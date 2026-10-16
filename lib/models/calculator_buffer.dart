@@ -6,6 +6,7 @@ import 'package:graphing_calculator/models/button_mode.dart';
 import 'package:graphing_calculator/models/calc_error.dart';
 import 'package:graphing_calculator/models/calc_menu.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
+import 'package:graphing_calculator/models/exact_parser.dart';
 import 'package:graphing_calculator/models/expression_layout.dart';
 import 'package:graphing_calculator/models/expression_parser.dart';
 
@@ -884,7 +885,7 @@ class CalculatorBuffer extends ChangeNotifier {
   void _pushResultOrError(List<CalcToken> tokens) {
     try {
       final result = _evaluate(tokens);
-      lines.add(CalcLine(stringToTokens(result), isResult: true));
+      lines.add(CalcLine(result, isResult: true));
       lines.add(CalcLine([]));
     } catch (e) {
       final calcError = e is CalcError ? e : SyntaxError(tokens.length);
@@ -914,7 +915,7 @@ class CalculatorBuffer extends ChangeNotifier {
     );
   }
 
-  String _evaluate(List<CalcToken> tokens) {
+  List<CalcToken> _evaluate(List<CalcToken> tokens) {
     final storeIndex = tokens.indexWhere((t) => t is StoreToken);
 
     if (storeIndex >= 0) {
@@ -927,16 +928,49 @@ class CalculatorBuffer extends ChangeNotifier {
       ans: lastAnswer,
     ).parseExpression();
 
-    final formatted = _formatResult(result, tokens.length);
+    final output = _resultTokens(result, tokens, tokens.length);
     _recordAnswer(result);
-    return formatted;
+    return output;
+  }
+
+  static const int _maxFractionDigits = 10;
+
+  List<CalcToken> _resultTokens(
+    double value,
+    List<CalcToken> source,
+    int tokenIndex,
+  ) {
+    final formatted = _formatResult(value, tokenIndex);
+
+    if (ExactParser.containsFraction(source)) {
+      final exact = ExactParser.tryEvaluate(
+        source,
+        variables: variables,
+        ans: lastAnswer,
+      );
+
+      if (exact != null && !exact.isInteger) {
+        final top = exact.numerator.toString();
+        final bottom = exact.denominator.toString();
+        final topDigits = top.startsWith('-') ? top.length - 1 : top.length;
+
+        if (topDigits <= _maxFractionDigits &&
+            bottom.length <= _maxFractionDigits) {
+          return [
+            FractionToken([NumberToken(top)], [NumberToken(bottom)]),
+          ];
+        }
+      }
+    }
+
+    return stringToTokens(formatted);
   }
 
   void _recordAnswer(double value) {
     if (!value.isNaN) lastAnswer = value;
   }
 
-  String _evaluateStore(List<CalcToken> tokens, int storeIndex) {
+  List<CalcToken> _evaluateStore(List<CalcToken> tokens, int storeIndex) {
     final target = tokens.length == storeIndex + 2
         ? tokens[storeIndex + 1]
         : null;
@@ -956,11 +990,11 @@ class CalculatorBuffer extends ChangeNotifier {
       ans: lastAnswer,
     ).parseExpression();
 
-    final formatted = _formatResult(value, storeIndex);
+    final output = _resultTokens(value, source, storeIndex);
     variables[target.name] = value;
     _recordAnswer(value);
 
-    return formatted;
+    return output;
   }
 
   static const int _maxResultChars = 15;

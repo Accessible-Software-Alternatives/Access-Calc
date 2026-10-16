@@ -570,7 +570,7 @@ class CalculatorPainter extends CustomPainter {
       childBaselineY = inDenominator
           ? baselineY + tl.denominatorDrop
           : baselineY - tl.numeratorRise;
-      childSmallText = smallText;
+      childSmallText = true;
     } else if (boxToken is ExponentToken) {
       childBaselineY = baselineY - engine.rowHeight * kSuperscriptRaise * scale;
       childSmallText = true;
