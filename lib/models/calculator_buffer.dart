@@ -5,10 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:graphing_calculator/models/button_mode.dart';
 import 'package:graphing_calculator/models/calc_error.dart';
 import 'package:graphing_calculator/models/calc_menu.dart';
+import 'package:graphing_calculator/models/calc_menus.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
 import 'package:graphing_calculator/models/exact_parser.dart';
 import 'package:graphing_calculator/models/expression_layout.dart';
 import 'package:graphing_calculator/models/expression_parser.dart';
+import 'package:graphing_calculator/models/graph_function.dart';
+
+enum CalcScreen { home, yEquals }
+
+enum YFocus { expression, style }
 
 class CalculatorBuffer extends ChangeNotifier {
   List<CalcLine> lines = [CalcLine([])];
@@ -34,13 +40,65 @@ class CalculatorBuffer extends ChangeNotifier {
   CalcError? error;
   List<CalcToken>? _erroredTokens;
 
-  final List<CalcMenu> menuStack = [];
+  final List<CalcMenuBase> menuStack = [];
 
-  CalcMenu? get activeMenu => menuStack.isEmpty ? null : menuStack.last;
+  CalcMenuBase? get activeMenu => menuStack.isEmpty ? null : menuStack.last;
 
   bool get hasMenu => menuStack.isNotEmpty;
 
-  void pushMenu(CalcMenu menu) {
+  final List<GraphFunction> functions = GraphFunction.createDefaults();
+
+  CalcScreen screen = CalcScreen.home;
+
+  YFocus yFocus = YFocus.expression;
+
+  bool get isYEquals => screen == CalcScreen.yEquals;
+
+  bool get isEditingStyle => isYEquals && yFocus == YFocus.style;
+
+  int _yRow = 0;
+
+  _HomeSnapshot? _homeSnapshot;
+
+  void openYEquals() {
+    if (isYEquals) return;
+    _resetCursorBlink();
+
+    _homeSnapshot = _HomeSnapshot(lines, cursorRow, scrollOffset, _path);
+
+    screen = CalcScreen.yEquals;
+    yFocus = YFocus.expression;
+    lines = [for (final f in functions) CalcLine(f.tokens)];
+    cursorRow = _yRow.clamp(0, lines.length - 1);
+    scrollOffset = 0;
+    _resetPath(_frameEndColumn(lines[cursorRow].tokens));
+    _updateScroll();
+
+    notifyListeners();
+  }
+
+  void _closeYEquals() {
+    if (!isYEquals) return;
+    _resetCursorBlink();
+
+    final snapshot = _homeSnapshot;
+    _yRow = cursorRow;
+    screen = CalcScreen.home;
+    yFocus = YFocus.expression;
+    menuStack.clear();
+
+    if (snapshot != null) {
+      lines = snapshot.lines;
+      cursorRow = snapshot.cursorRow;
+      scrollOffset = snapshot.scrollOffset;
+      _path = snapshot.path;
+    }
+    _homeSnapshot = null;
+
+    notifyListeners();
+  }
+
+  void pushMenu(CalcMenuBase menu) {
     menuStack.add(menu);
     notifyListeners();
   }
@@ -48,6 +106,16 @@ class CalculatorBuffer extends ChangeNotifier {
   void popMenu() {
     if (menuStack.isEmpty) return;
     menuStack.removeLast();
+    notifyListeners();
+  }
+
+  void quitToHome() {
+    if (error != null) {
+      error = null;
+      _erroredTokens = null;
+    }
+    menuStack.clear();
+    _closeYEquals();
     notifyListeners();
   }
 
@@ -61,30 +129,7 @@ class CalculatorBuffer extends ChangeNotifier {
     final menu = activeMenu;
     if (menu == null) return false;
 
-    switch (key) {
-      case MenuKey.up:
-        menu.moveUp();
-        break;
-      case MenuKey.down:
-        menu.moveDown();
-        break;
-      case MenuKey.left:
-        menu.previousPage();
-        break;
-      case MenuKey.right:
-        menu.nextPage();
-        break;
-      case MenuKey.enter:
-        menu.activateSelection();
-        break;
-      case MenuKey.cancel:
-        menu.cancel();
-        break;
-      case MenuKey.selector:
-        if (selector == null) return false;
-        if (!menu.activateSelector(selector)) return false;
-        break;
-    }
+    if (!menu.handleKey(key, selector: selector)) return false;
 
     notifyListeners();
     return true;
@@ -553,6 +598,9 @@ class CalculatorBuffer extends ChangeNotifier {
       } else if (_path.length > 1) {
         _path.removeLast();
         notifyListeners();
+      } else if (isYEquals) {
+        yFocus = YFocus.style;
+        notifyListeners();
       }
       return;
     }
@@ -589,6 +637,13 @@ class CalculatorBuffer extends ChangeNotifier {
 
   void moveRight() {
     _resetCursorBlink();
+
+    if (isEditingStyle) {
+      yFocus = YFocus.expression;
+      _resetPath(0);
+      notifyListeners();
+      return;
+    }
 
     if (!isOnEditableLine) return;
 
@@ -729,6 +784,11 @@ class CalculatorBuffer extends ChangeNotifier {
       menuStack.clear();
     }
 
+    if (isEditingStyle) {
+      notifyListeners();
+      return;
+    }
+
     if (!isOnEditableLine) {
       _clearHistoryEntry();
       notifyListeners();
@@ -748,7 +808,7 @@ class CalculatorBuffer extends ChangeNotifier {
     if (line.tokens.isNotEmpty) {
       line.tokens.clear();
       _resetPath();
-    } else {
+    } else if (!isYEquals) {
       scrollOffset = lines.length - 1;
     }
 
@@ -836,6 +896,19 @@ class CalculatorBuffer extends ChangeNotifier {
 
   void enter() {
     _resetCursorBlink();
+
+    if (isYEquals) {
+      if (isEditingStyle) {
+        pushMenu(CalcMenus.graphStyle(this, cursorRow));
+        return;
+      }
+      if (cursorRow < lines.length - 1) {
+        _switchLine(cursorRow + 1);
+        _updateScroll();
+      }
+      notifyListeners();
+      return;
+    }
 
     if (!isOnEditableLine) {
       final sourceLine = lines[cursorRow];
@@ -1136,6 +1209,7 @@ class CalculatorBuffer extends ChangeNotifier {
   }
 
   bool get isOnEditableLine {
+    if (isYEquals) return yFocus == YFocus.expression;
     return cursorRow == lines.length - 1;
   }
 
@@ -1168,6 +1242,15 @@ class CalcLine {
   CalcLine(this.tokens, {this.isResult = false});
 
   String get displayText => tokens.map((t) => t.displayText).join();
+}
+
+class _HomeSnapshot {
+  final List<CalcLine> lines;
+  final int cursorRow;
+  final int scrollOffset;
+  final List<_CursorFrame> path;
+
+  _HomeSnapshot(this.lines, this.cursorRow, this.scrollOffset, this.path);
 }
 
 class CursorPosition {

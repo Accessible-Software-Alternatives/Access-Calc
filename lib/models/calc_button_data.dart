@@ -189,17 +189,24 @@ class CalcButtonData {
 
 extension ButtonActionExecutor on ButtonAction {
   void execute(CalculatorBuffer buffer) {
-    if (buffer.hasMenu && _routeToMenu(buffer)) {
-      _consumeShift(buffer);
-      return;
-    }
-
     if (this == ButtonAction.second) {
       _advanceSecond(buffer);
       return;
     }
     if (this == ButtonAction.alpha) {
       _advanceAlpha(buffer);
+      return;
+    }
+
+    if (this == ButtonAction.quit) {
+      buffer.quitToHome();
+      _consumeShift(buffer);
+      return;
+    }
+
+    if (buffer.hasMenu) {
+      _sendToMenu(buffer);
+      _consumeShift(buffer);
       return;
     }
 
@@ -384,13 +391,20 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.pushMenu(CalcMenus.math(buffer));
         break;
 
+      case ButtonAction.yEquals:
+        buffer.openYEquals();
+        break;
+
+      case ButtonAction.xtheta:
+        buffer.insertVariable('X');
+        break;
+
       case ButtonAction.fraction:
         buffer.insertFraction();
         break;
 
       case ButtonAction.comma:
       case ButtonAction.vars:
-      case ButtonAction.yEquals:
       case ButtonAction.window:
       case ButtonAction.zoom:
       case ButtonAction.trace:
@@ -398,7 +412,6 @@ extension ButtonActionExecutor on ButtonAction {
       case ButtonAction.apps:
       case ButtonAction.prgm:
       case ButtonAction.mode:
-      case ButtonAction.xtheta:
       case ButtonAction.stat:
       case ButtonAction.on:
       case ButtonAction.eToX:
@@ -459,30 +472,35 @@ extension ButtonActionExecutor on ButtonAction {
 }
 
 extension _MenuRouting on ButtonAction {
-  bool _routeToMenu(CalculatorBuffer buffer) {
+  void _sendToMenu(CalculatorBuffer buffer) {
+    final key = _menuKey;
+    if (key != null) {
+      buffer.handleMenuKey(key);
+      return;
+    }
+
+    final selector = _menuSelector;
+    if (selector != null) {
+      buffer.handleMenuKey(MenuKey.selector, selector: selector);
+    }
+  }
+
+  MenuKey? get _menuKey {
     switch (this) {
       case ButtonAction.up:
-        return buffer.handleMenuKey(MenuKey.up);
+        return MenuKey.up;
       case ButtonAction.down:
-        return buffer.handleMenuKey(MenuKey.down);
+        return MenuKey.down;
       case ButtonAction.left:
-        return buffer.handleMenuKey(MenuKey.left);
+        return MenuKey.left;
       case ButtonAction.right:
-        return buffer.handleMenuKey(MenuKey.right);
+        return MenuKey.right;
       case ButtonAction.enter:
-        return buffer.handleMenuKey(MenuKey.enter);
+        return MenuKey.enter;
       case ButtonAction.clear:
-      case ButtonAction.quit:
-        return buffer.handleMenuKey(MenuKey.cancel);
-
-      case ButtonAction.second:
-      case ButtonAction.alpha:
-        return false;
-
+        return MenuKey.cancel;
       default:
-        final selector = _menuSelector;
-        if (selector == null) return false;
-        return buffer.handleMenuKey(MenuKey.selector, selector: selector);
+        return null;
     }
   }
 

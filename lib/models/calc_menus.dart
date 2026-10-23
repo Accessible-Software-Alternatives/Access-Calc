@@ -1,7 +1,40 @@
+import 'package:graphing_calculator/models/calc_dialog.dart';
 import 'package:graphing_calculator/models/calc_menu.dart';
 import 'package:graphing_calculator/models/calculator_buffer.dart';
+import 'package:graphing_calculator/models/graph_function.dart';
 
 class CalcMenus {
+  static CalcDialog graphStyle(CalculatorBuffer buffer, int functionIndex) {
+    final fn = buffer.functions[functionIndex];
+
+    final color = DialogField(
+      'Color:',
+      [for (final c in GraphColor.values) c.label],
+      selected: fn.color.index,
+      optionColors: [for (final c in GraphColor.values) c.color],
+    );
+
+    final line = DialogField('Line:', [
+      for (final s in GraphLineStyle.values) s.glyph,
+    ], selected: fn.lineStyle.index);
+
+    return CalcDialog(
+      fields: [color, line],
+      buttons: const ['OK', 'CLEAR'],
+      onButton: (dialog, button) {
+        if (button == 0) {
+          fn.color = GraphColor.values[color.selected];
+          fn.lineStyle = GraphLineStyle.values[line.selected];
+          buffer.popMenu();
+        } else {
+          color.selected = GraphColor.defaultFor(functionIndex).index;
+          line.selected = GraphLineStyle.normal.index;
+        }
+      },
+      onCancel: (_) => buffer.popMenu(),
+    );
+  }
+
   static CalcMenu math(CalculatorBuffer buffer) {
     return CalcMenu(
       pages: const [

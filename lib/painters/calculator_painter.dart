@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:graphing_calculator/models/button_mode.dart';
+import 'package:graphing_calculator/models/calc_dialog.dart';
+import 'package:graphing_calculator/models/calc_menu.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
 import 'package:graphing_calculator/models/calculator_buffer.dart';
 import 'package:graphing_calculator/models/expression_layout.dart';
+import 'package:graphing_calculator/models/graph_function.dart';
 import 'package:graphing_calculator/painters/menu_painter.dart';
 
 class CalculatorPainter extends CustomPainter {
@@ -29,7 +32,8 @@ class CalculatorPainter extends CustomPainter {
     );
 
     final menu = buffer.activeMenu;
-    if (menu != null) {
+
+    if (menu is CalcMenu) {
       MenuPainter.paint(
         canvas: canvas,
         size: size,
@@ -41,6 +45,25 @@ class CalculatorPainter extends CustomPainter {
       return;
     }
 
+    if (buffer.isYEquals) {
+      _paintYEquals(canvas, size);
+    } else {
+      _paintHome(canvas, size);
+    }
+
+    if (menu is CalcDialog) {
+      MenuPainter.paintDialog(
+        canvas: canvas,
+        size: size,
+        dialog: menu,
+        textStyle: menuTextStyle,
+        columns: columns,
+        visibleRows: CalculatorBuffer.visibleLineCount,
+      );
+    }
+  }
+
+  void _paintHome(Canvas canvas, Size size) {
     final rowHeight = size.height / _rowsOnScreen;
 
     final textStyle = TextStyle(
@@ -178,6 +201,247 @@ class CalculatorPainter extends CustomPainter {
     }
 
     canvas.restore();
+  }
+
+  static const double _yChromeChars = 4.7;
+
+  void _paintYEquals(Canvas canvas, Size size) {
+    final rowHeight = size.height / CalculatorBuffer.visibleLineCount;
+
+    final textStyle = TextStyle(
+      fontFamily: 'Courier',
+      fontSize: rowHeight * 0.75,
+      color: Colors.black,
+      fontWeight: FontWeight.w600,
+      height: 1,
+    );
+
+    final engine = ExpressionLayoutEngine(
+      style: textStyle,
+      rowHeight: rowHeight,
+    );
+
+    final exprX = engine.charWidth * _yChromeChars;
+    final exprWidth = size.width - exprX;
+
+    final editing = buffer.isOnEditableLine;
+
+    final cursorEndOwner =
+        (editing &&
+            buffer.isAtEndOfCurrentBox &&
+            buffer.currentBoxOwner is RootToken)
+        ? buffer.currentBoxOwner
+        : null;
+
+    final leadArrowOwner = editing ? buffer.fractionBeforeCursor : null;
+
+    final all = buffer.lines;
+    final layouts = <ExpressionLayout>[
+      for (int i = 0; i < all.length; i++)
+        engine.layout(
+          all[i].tokens,
+          cursorEndOwner: i == buffer.cursorRow ? cursorEndOwner : null,
+          leadArrowOwner: i == buffer.cursorRow ? leadArrowOwner : null,
+        ),
+    ];
+
+    final cursorIdx = buffer.cursorRow.clamp(0, all.length - 1);
+    int startIdx = cursorIdx;
+    int endIdx = cursorIdx;
+    double usedHeight = layouts[cursorIdx].height;
+
+    while (endIdx + 1 < all.length) {
+      final h = layouts[endIdx + 1].height;
+      if (usedHeight + h > size.height) break;
+      endIdx++;
+      usedHeight += h;
+    }
+    while (startIdx - 1 >= 0) {
+      final h = layouts[startIdx - 1].height;
+      if (usedHeight + h > size.height) break;
+      startIdx--;
+      usedHeight += h;
+    }
+
+    final rows = <_Row>[
+      for (int i = startIdx; i <= endIdx; i++)
+        _Row(line: all[i], layout: layouts[i], absoluteIndex: i),
+    ];
+
+    double scrollY = 0;
+    if (rows.length == 1 && editing && rows.first.layout.height > size.height) {
+      final located = _locateCursorIn(engine, rows.first, 0);
+      if (located != null) {
+        final leaf = engine.leafMetricsFor(located.smallText);
+        final cursorTop = located.baselineY - leaf.ascent;
+        final cursorBottom = located.baselineY + leaf.descent;
+        if (cursorBottom > size.height) scrollY = cursorBottom - size.height;
+        if (cursorTop - scrollY < 0) scrollY = cursorTop;
+        scrollY = scrollY.clamp(0.0, rows.first.layout.height - size.height);
+      }
+    }
+
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    canvas.translate(0, -scrollY);
+
+    double y = 0;
+    _Row? editableRow;
+    double editableTop = 0;
+    double editableShift = 0;
+
+    for (final row in rows) {
+      final fn = buffer.functions[row.absoluteIndex];
+      final isCursorRow = row.absoluteIndex == buffer.cursorRow;
+      final isEditable = isCursorRow && editing;
+
+      double shift = 0;
+      if (isEditable) {
+        final located = _locateCursorIn(engine, row, y);
+        if (located != null) {
+          final leaf = engine.leafMetricsFor(located.smallText);
+          final right = located.x + (located.width ?? leaf.charWidth);
+          if (right > exprWidth) shift = right - exprWidth;
+        }
+        editableRow = row;
+        editableTop = y;
+        editableShift = shift;
+      }
+
+      _paintYChrome(
+        canvas: canvas,
+        engine: engine,
+        textStyle: textStyle,
+        fn: fn,
+        top: y,
+        ascent: row.layout.ascent,
+        styleSelected: isCursorRow && buffer.isEditingStyle,
+      );
+
+      canvas.save();
+      canvas.clipRect(Rect.fromLTWH(exprX, y, exprWidth, row.layout.height));
+      _paintExpression(
+        canvas: canvas,
+        engine: engine,
+        expr: row.layout,
+        origin: Offset(exprX - shift, y),
+        style: textStyle,
+      );
+      canvas.restore();
+
+      y += row.layout.height;
+    }
+
+    if (buffer.cursorVisible && editableRow != null) {
+      _paintCursor(
+        canvas: canvas,
+        engine: engine,
+        row: editableRow,
+        top: editableTop,
+        originX: exprX - editableShift,
+      );
+    }
+
+    canvas.restore();
+  }
+
+  void _paintYChrome({
+    required Canvas canvas,
+    required ExpressionLayoutEngine engine,
+    required TextStyle textStyle,
+    required GraphFunction fn,
+    required double top,
+    required double ascent,
+    required bool styleSelected,
+  }) {
+    final leaf = engine.leafMetricsFor(false);
+    final cw = engine.charWidth;
+    final baselineY = top + ascent;
+    final cellTop = baselineY - leaf.ascent;
+    final cellHeight = leaf.ascent + leaf.descent;
+
+    final highlightStyle = textStyle.copyWith(color: _highlightTextColor);
+
+    void centered(String text, TextStyle style, double left, double width) {
+      final tp = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(
+        canvas,
+        Offset(
+          left + (width - tp.width) / 2,
+          cellTop + (cellHeight - tp.height) / 2,
+        ),
+      );
+    }
+
+    if (styleSelected) {
+      canvas.drawRect(
+        Rect.fromLTWH(0, cellTop, cw * 2, cellHeight),
+        Paint()..color = Colors.black,
+      );
+    }
+
+    final side = cw * 0.9;
+    final square = Rect.fromCenter(
+      center: Offset(cw / 2, cellTop + cellHeight / 2),
+      width: side,
+      height: side,
+    );
+    canvas.drawRect(square, Paint()..color = fn.color.color);
+    if (styleSelected) {
+      canvas.drawRect(
+        square,
+        Paint()
+          ..color = _highlightTextColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
+
+    centered(
+      fn.lineStyle.glyph,
+      styleSelected ? highlightStyle : textStyle,
+      cw,
+      cw,
+    );
+
+    final yPainter = TextPainter(
+      text: TextSpan(text: 'Y', style: textStyle),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final yTop = cellTop + (cellHeight - yPainter.height) / 2;
+    yPainter.paint(canvas, Offset(cw * 2, yTop));
+
+    final digitPainter = TextPainter(
+      text: TextSpan(
+        text: '${fn.index + 1}',
+        style: textStyle.copyWith(fontSize: (textStyle.fontSize ?? 12) * 0.62),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    digitPainter.paint(
+      canvas,
+      Offset(
+        cw * 3,
+        yTop + yPainter.height - digitPainter.height + cellHeight * 0.12,
+      ),
+    );
+
+    const equalsLeft = 3.7;
+    if (fn.isDefined) {
+      canvas.drawRect(
+        Rect.fromLTWH(cw * equalsLeft, cellTop, cw, cellHeight),
+        Paint()..color = Colors.black,
+      );
+    }
+    centered(
+      '=',
+      fn.isDefined ? highlightStyle : textStyle,
+      cw * equalsLeft,
+      cw,
+    );
   }
 
   void _paintLine({
@@ -407,8 +671,9 @@ class CalculatorPainter extends CustomPainter {
     required ExpressionLayoutEngine engine,
     required _Row row,
     required double top,
+    double originX = 0,
   }) {
-    final located = _locateCursorIn(engine, row, top);
+    final located = _locateCursorIn(engine, row, top, originX: originX);
 
     if (located == null) return;
 
@@ -497,13 +762,14 @@ class CalculatorPainter extends CustomPainter {
   _CursorLocation? _locateCursorIn(
     ExpressionLayoutEngine engine,
     _Row row,
-    double top,
-  ) {
+    double top, {
+    double originX = 0,
+  }) {
     return _locateCursor(
       expr: row.layout,
       path: buffer.cursorPath,
       level: 0,
-      originX: 0,
+      originX: originX,
       baselineY: top + row.layout.ascent,
       smallText: false,
       engine: engine,

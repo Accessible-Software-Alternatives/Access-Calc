@@ -47,7 +47,11 @@ class MenuPage {
   const MenuPage(this.title, this.items);
 }
 
-class CalcMenu {
+abstract class CalcMenuBase {
+  bool handleKey(MenuKey key, {String? selector});
+}
+
+class CalcMenu extends CalcMenuBase {
   final String? heading;
 
   final List<MenuPage> pages;
@@ -73,6 +77,33 @@ class CalcMenu {
     this.tabPosition = MenuTabPosition.top,
     this.onCancel,
   });
+
+  @override
+  bool handleKey(MenuKey key, {String? selector}) {
+    switch (key) {
+      case MenuKey.up:
+        moveUp();
+        return true;
+      case MenuKey.down:
+        moveDown();
+        return true;
+      case MenuKey.left:
+        previousPage();
+        return true;
+      case MenuKey.right:
+        nextPage();
+        return true;
+      case MenuKey.enter:
+        activateSelection();
+        return true;
+      case MenuKey.cancel:
+        cancel();
+        return true;
+      case MenuKey.selector:
+        if (selector == null) return false;
+        return activateSelector(selector);
+    }
+  }
 
   bool get hasTabs => pages.length > 1;
 
