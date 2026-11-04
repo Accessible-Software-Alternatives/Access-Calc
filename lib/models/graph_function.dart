@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:graphing_calculator/models/calc_token.dart';
+import 'package:graphing_calculator/models/expression_parser.dart';
 
 enum GraphLineStyle {
   // probably temp
@@ -57,6 +58,47 @@ class GraphFunction {
   String get name => 'Y${index + 1}';
 
   bool get isDefined => tokens.isNotEmpty;
+
+  String get signature => _signatureOf(tokens);
+
+  static String _signatureOf(List<CalcToken> tokens) {
+    final out = StringBuffer();
+    for (final t in tokens) {
+      out
+        ..write(t.runtimeType)
+        ..write(':');
+      if (t is FractionToken) {
+        out
+          ..write('(')
+          ..write(_signatureOf(t.numerator))
+          ..write(')/(')
+          ..write(_signatureOf(t.denominator))
+          ..write(')');
+      } else if (t is BoxToken) {
+        out
+          ..write('(')
+          ..write(_signatureOf(t.children))
+          ..write(')');
+      } else {
+        out.write(t.displayText);
+      }
+      out.write('|');
+    }
+    return out.toString();
+  }
+
+  double valueAt(double x, Map<String, double> variables) {
+    variables['X'] = x;
+    try {
+      final y = ExpressionParser(
+        tokens,
+        variables: variables,
+      ).parseExpression();
+      return y.isFinite ? y : double.nan;
+    } catch (_) {
+      return double.nan;
+    }
+  }
 
   void resetStyle() {
     color = GraphColor.defaultFor(index);

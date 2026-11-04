@@ -11,8 +11,9 @@ import 'package:graphing_calculator/models/exact_parser.dart';
 import 'package:graphing_calculator/models/expression_layout.dart';
 import 'package:graphing_calculator/models/expression_parser.dart';
 import 'package:graphing_calculator/models/graph_function.dart';
+import 'package:graphing_calculator/models/graph_window.dart';
 
-enum CalcScreen { home, yEquals }
+enum CalcScreen { home, yEquals, window, graph }
 
 enum YFocus { expression, style }
 
@@ -48,54 +49,200 @@ class CalculatorBuffer extends ChangeNotifier {
 
   final List<GraphFunction> functions = GraphFunction.createDefaults();
 
+  final GraphWindow window = GraphWindow();
+
   CalcScreen screen = CalcScreen.home;
 
   YFocus yFocus = YFocus.expression;
 
   bool get isYEquals => screen == CalcScreen.yEquals;
 
+  bool get isWindow => screen == CalcScreen.window;
+
+  bool get isGraph => screen == CalcScreen.graph;
+
+  bool get isEditorScreen => isYEquals || isWindow;
+
   bool get isEditingStyle => isYEquals && yFocus == YFocus.style;
 
-  int _yRow = 0;
+  int graphGeneration = 0;
+
+  String? _builtGraphSignature;
+
+  String? _shownGraphSignature;
+
+  String _graphSignature() {
+    final out = StringBuffer();
+    for (final f in functions) {
+      out
+        ..write(f.isDefined ? f.signature : '')
+        ..write('\n');
+    }
+    out.write('${window.xMin},${window.xMax}\n');
+    for (final e in variables.entries) {
+      out.write('${e.key}=${e.value},');
+    }
+    return out.toString();
+  }
+
+  double graphReveal = 1;
+
+  Timer? _revealTimer;
+
+  static const int _revealPerFunctionMs = 250;
+  static const int _revealMaxMs = 1000;
+
+  String _graphLookSignature() {
+    final out = StringBuffer(_graphSignature())..write('#');
+    for (final f in functions) {
+      if (f.isDefined) out.write('${f.color.index}/${f.lineStyle.index},');
+    }
+    return out.toString();
+  }
+
+  void _startGraphReveal() {
+    _revealTimer?.cancel();
+    _revealTimer = null;
+
+    final count = functions.where((f) => f.isDefined).length;
+    if (count == 0) {
+      graphReveal = 1;
+      return;
+    }
+
+    graphReveal = 0;
+
+    final totalMs = math.min(_revealPerFunctionMs * count, _revealMaxMs);
+    final start = DateTime.now();
+    _revealTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+      final t = DateTime.now().difference(start).inMilliseconds / totalMs;
+
+      if (t >= 1) {
+        graphReveal = 1;
+        timer.cancel();
+        _revealTimer = null;
+      } else {
+        graphReveal = t;
+      }
+      notifyListeners();
+    });
+  }
+
+  void _stopGraphReveal() {
+    _revealTimer?.cancel();
+    _revealTimer = null;
+    graphReveal = 1;
+  }
+
+  final Map<CalcScreen, int> _lastRow = {};
 
   _HomeSnapshot? _homeSnapshot;
 
-  void openYEquals() {
-    if (isYEquals) return;
+  void openYEquals() => _showScreen(CalcScreen.yEquals);
+
+  void openWindow() => _showScreen(CalcScreen.window);
+
+  void openGraph() {
+    _showScreen(CalcScreen.graph);
+
+    if (!window.isValid) {
+      _showScreen(CalcScreen.home);
+      _raiseError(WindowRangeError());
+    }
+  }
+
+  void _showScreen(CalcScreen target) {
+    if (target == screen) return;
     _resetCursorBlink();
 
-    _homeSnapshot = _HomeSnapshot(lines, cursorRow, scrollOffset, _path);
-
-    screen = CalcScreen.yEquals;
-    yFocus = YFocus.expression;
-    lines = [for (final f in functions) CalcLine(f.tokens)];
-    cursorRow = _yRow.clamp(0, lines.length - 1);
-    scrollOffset = 0;
-    _resetPath(_frameEndColumn(lines[cursorRow].tokens));
-    _updateScroll();
+    _leaveScreen();
+    _enterScreen(target);
 
     notifyListeners();
   }
 
-  void _closeYEquals() {
-    if (!isYEquals) return;
-    _resetCursorBlink();
+  void _leaveScreen() {
+    if (isGraph) _stopGraphReveal();
 
-    final snapshot = _homeSnapshot;
-    _yRow = cursorRow;
+    if (isWindow) _commitWindowRow(cursorRow);
+
+    if (isEditorScreen) {
+      _lastRow[screen] = cursorRow;
+
+      final snapshot = _homeSnapshot;
+      if (snapshot != null) {
+        lines = snapshot.lines;
+        cursorRow = snapshot.cursorRow;
+        scrollOffset = snapshot.scrollOffset;
+        _path = snapshot.path;
+      }
+      _homeSnapshot = null;
+    }
+
     screen = CalcScreen.home;
     yFocus = YFocus.expression;
-    menuStack.clear();
+  }
 
-    if (snapshot != null) {
-      lines = snapshot.lines;
-      cursorRow = snapshot.cursorRow;
-      scrollOffset = snapshot.scrollOffset;
-      _path = snapshot.path;
+  void _enterScreen(CalcScreen target) {
+    screen = target;
+    yFocus = YFocus.expression;
+
+    if (target == CalcScreen.graph && window.isValid) {
+      final signature = _graphSignature();
+      if (signature != _builtGraphSignature) {
+        _builtGraphSignature = signature;
+        graphGeneration++;
+      }
+
+      final look = _graphLookSignature();
+      if (look != _shownGraphSignature) {
+        _shownGraphSignature = look;
+        _startGraphReveal();
+      }
     }
-    _homeSnapshot = null;
 
-    notifyListeners();
+    if (target == CalcScreen.home || target == CalcScreen.graph) return;
+
+    _homeSnapshot = _HomeSnapshot(lines, cursorRow, scrollOffset, _path);
+
+    final rows = target == CalcScreen.yEquals
+        ? [for (final f in functions) f.tokens]
+        : [
+            for (final field in WindowField.values)
+              stringToTokens(formatWindowValue(window[field])),
+          ];
+
+    lines = [for (final tokens in rows) CalcLine(tokens)];
+    cursorRow = (_lastRow[target] ?? 0).clamp(0, lines.length - 1);
+    scrollOffset = 0;
+    _resetPath(_frameEndColumn(lines[cursorRow].tokens));
+    _updateScroll();
+  }
+
+  void _commitWindowRow(int row) {
+    final field = WindowField.values[row];
+    final tokens = lines[row].tokens;
+
+    double? value;
+    try {
+      value = ExpressionParser(
+        tokens,
+        variables: variables,
+        ans: lastAnswer,
+      ).parseExpression();
+    } catch (_) {
+      value = null;
+    }
+
+    if (value == null || !value.isFinite || (field.isScale && value <= 0)) {
+      value = window[field];
+    } else {
+      window[field] = value;
+    }
+
+    tokens
+      ..clear()
+      ..addAll(stringToTokens(formatWindowValue(value)));
   }
 
   void pushMenu(CalcMenuBase menu) {
@@ -115,7 +262,7 @@ class CalculatorBuffer extends ChangeNotifier {
       _erroredTokens = null;
     }
     menuStack.clear();
-    _closeYEquals();
+    _showScreen(CalcScreen.home);
     notifyListeners();
   }
 
@@ -732,6 +879,8 @@ class CalculatorBuffer extends ChangeNotifier {
   }
 
   void _switchLine(int newRow) {
+    if (isWindow) _commitWindowRow(cursorRow);
+
     final column = _path.first.column;
     cursorRow = newRow;
 
@@ -808,7 +957,7 @@ class CalculatorBuffer extends ChangeNotifier {
     if (line.tokens.isNotEmpty) {
       line.tokens.clear();
       _resetPath();
-    } else if (!isYEquals) {
+    } else if (!isEditorScreen) {
       scrollOffset = lines.length - 1;
     }
 
@@ -897,7 +1046,7 @@ class CalculatorBuffer extends ChangeNotifier {
   void enter() {
     _resetCursorBlink();
 
-    if (isYEquals) {
+    if (isEditorScreen) {
       if (isEditingStyle) {
         pushMenu(CalcMenus.graphStyle(this, cursorRow));
         return;
@@ -962,12 +1111,16 @@ class CalculatorBuffer extends ChangeNotifier {
       lines.add(CalcLine([]));
     } catch (e) {
       final calcError = e is CalcError ? e : SyntaxError(tokens.length);
-      _erroredTokens = List<CalcToken>.from(tokens);
       lines.add(CalcLine(stringToTokens('Error'), isResult: true));
       lines.add(CalcLine([]));
-      error = calcError;
-      pushMenu(_buildErrorMenu(calcError));
+      _raiseError(calcError, tokens);
     }
+  }
+
+  void _raiseError(CalcError calcError, [List<CalcToken>? tokens]) {
+    _erroredTokens = tokens == null ? null : List<CalcToken>.from(tokens);
+    error = calcError;
+    pushMenu(_buildErrorMenu(calcError));
   }
 
   CalcMenu _buildErrorMenu(CalcError calcError) {
@@ -975,7 +1128,10 @@ class CalculatorBuffer extends ChangeNotifier {
       heading: 'ERROR: ${calcError.title}',
       body: wrapMenuText(calcError.message, displayColumns),
       pages: [
-        const MenuPage('ERROR', [MenuItem('Quit'), MenuItem('Goto')]),
+        MenuPage('ERROR', [
+          const MenuItem('Quit'),
+          if (calcError.canGoto) const MenuItem('Goto'),
+        ]),
       ],
       onSelect: (menu, _, itemIndex) {
         if (itemIndex == 0) {
@@ -1209,7 +1365,8 @@ class CalculatorBuffer extends ChangeNotifier {
   }
 
   bool get isOnEditableLine {
-    if (isYEquals) return yFocus == YFocus.expression;
+    if (isEditorScreen) return yFocus == YFocus.expression;
+    if (isGraph) return false;
     return cursorRow == lines.length - 1;
   }
 
@@ -1231,6 +1388,7 @@ class CalculatorBuffer extends ChangeNotifier {
   @override
   void dispose() {
     _cursorTimer?.cancel();
+    _revealTimer?.cancel();
     super.dispose();
   }
 }

@@ -4,6 +4,8 @@ abstract class CalcError implements Exception {
 
   String get title;
   String get message;
+
+  bool get canGoto => true;
 }
 
 class DivideByZeroError extends CalcError {
@@ -44,4 +46,15 @@ class OverflowError extends CalcError {
   @override
   String get message =>
       'Calculation exceeds the range of values that this machine can display.';
+}
+
+class WindowRangeError extends CalcError {
+  WindowRangeError() : super(0);
+
+  @override
+  String get title => 'WINDOW RANGE';
+  @override
+  String get message => 'Xmin must be less than Xmax, and Ymin less than Ymax.';
+  @override
+  bool get canGoto => false;
 }

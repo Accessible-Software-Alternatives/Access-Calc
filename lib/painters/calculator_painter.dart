@@ -6,6 +6,8 @@ import 'package:graphing_calculator/models/calc_token.dart';
 import 'package:graphing_calculator/models/calculator_buffer.dart';
 import 'package:graphing_calculator/models/expression_layout.dart';
 import 'package:graphing_calculator/models/graph_function.dart';
+import 'package:graphing_calculator/models/graph_window.dart';
+import 'package:graphing_calculator/painters/graph_painter.dart';
 import 'package:graphing_calculator/painters/menu_painter.dart';
 
 class CalculatorPainter extends CustomPainter {
@@ -45,10 +47,27 @@ class CalculatorPainter extends CustomPainter {
       return;
     }
 
-    if (buffer.isYEquals) {
-      _paintYEquals(canvas, size);
-    } else {
-      _paintHome(canvas, size);
+    switch (buffer.screen) {
+      case CalcScreen.home:
+        _paintHome(canvas, size);
+        break;
+      case CalcScreen.yEquals:
+        _paintYEquals(canvas, size);
+        break;
+      case CalcScreen.window:
+        _paintWindow(canvas, size);
+        break;
+      case CalcScreen.graph:
+        GraphPainter.paint(
+          canvas: canvas,
+          size: size,
+          window: buffer.window,
+          functions: buffer.functions,
+          variables: buffer.variables,
+          generation: buffer.graphGeneration,
+          reveal: buffer.graphReveal,
+        );
+        break;
     }
 
     if (menu is CalcDialog) {
@@ -205,7 +224,59 @@ class CalculatorPainter extends CustomPainter {
 
   static const double _yChromeChars = 4.7;
 
+  static const double _windowChromeChars = 5;
+
   void _paintYEquals(Canvas canvas, Size size) {
+    _paintEditorRows(
+      canvas,
+      size,
+      chromeChars: _yChromeChars,
+      paintChrome: (engine, style, index, top, ascent) => _paintYChrome(
+        canvas: canvas,
+        engine: engine,
+        textStyle: style,
+        fn: buffer.functions[index],
+        top: top,
+        ascent: ascent,
+        styleSelected: index == buffer.cursorRow && buffer.isEditingStyle,
+      ),
+    );
+  }
+
+  void _paintWindow(Canvas canvas, Size size) {
+    _paintEditorRows(
+      canvas,
+      size,
+      chromeChars: _windowChromeChars,
+      paintChrome: (engine, style, index, top, ascent) {
+        final leaf = engine.leafMetricsFor(false);
+        final tp = TextPainter(
+          text: TextSpan(
+            text: '${WindowField.values[index].label}=',
+            style: style,
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final cellTop = top + ascent - leaf.ascent;
+        final cellHeight = leaf.ascent + leaf.descent;
+        tp.paint(canvas, Offset(0, cellTop + (cellHeight - tp.height) / 2));
+      },
+    );
+  }
+
+  void _paintEditorRows(
+    Canvas canvas,
+    Size size, {
+    required double chromeChars,
+    required void Function(
+      ExpressionLayoutEngine engine,
+      TextStyle style,
+      int index,
+      double top,
+      double ascent,
+    )
+    paintChrome,
+  }) {
     final rowHeight = size.height / CalculatorBuffer.visibleLineCount;
 
     final textStyle = TextStyle(
@@ -221,7 +292,7 @@ class CalculatorPainter extends CustomPainter {
       rowHeight: rowHeight,
     );
 
-    final exprX = engine.charWidth * _yChromeChars;
+    final exprX = engine.charWidth * chromeChars;
     final exprWidth = size.width - exprX;
 
     final editing = buffer.isOnEditableLine;
@@ -291,7 +362,6 @@ class CalculatorPainter extends CustomPainter {
     double editableShift = 0;
 
     for (final row in rows) {
-      final fn = buffer.functions[row.absoluteIndex];
       final isCursorRow = row.absoluteIndex == buffer.cursorRow;
       final isEditable = isCursorRow && editing;
 
@@ -308,15 +378,7 @@ class CalculatorPainter extends CustomPainter {
         editableShift = shift;
       }
 
-      _paintYChrome(
-        canvas: canvas,
-        engine: engine,
-        textStyle: textStyle,
-        fn: fn,
-        top: y,
-        ascent: row.layout.ascent,
-        styleSelected: isCursorRow && buffer.isEditingStyle,
-      );
+      paintChrome(engine, textStyle, row.absoluteIndex, y, row.layout.ascent);
 
       canvas.save();
       canvas.clipRect(Rect.fromLTWH(exprX, y, exprWidth, row.layout.height));

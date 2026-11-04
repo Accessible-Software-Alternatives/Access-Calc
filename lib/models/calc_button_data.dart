@@ -210,6 +210,11 @@ extension ButtonActionExecutor on ButtonAction {
       return;
     }
 
+    if (buffer.isGraph && !_isScreenKey) {
+      _consumeShift(buffer);
+      return;
+    }
+
     switch (this) {
       case ButtonAction.left:
         buffer.moveLeft();
@@ -395,6 +400,14 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.openYEquals();
         break;
 
+      case ButtonAction.window:
+        buffer.openWindow();
+        break;
+
+      case ButtonAction.graph:
+        buffer.openGraph();
+        break;
+
       case ButtonAction.xtheta:
         buffer.insertVariable('X');
         break;
@@ -405,10 +418,8 @@ extension ButtonActionExecutor on ButtonAction {
 
       case ButtonAction.comma:
       case ButtonAction.vars:
-      case ButtonAction.window:
       case ButtonAction.zoom:
       case ButtonAction.trace:
-      case ButtonAction.graph:
       case ButtonAction.apps:
       case ButtonAction.prgm:
       case ButtonAction.mode:
@@ -472,6 +483,11 @@ extension ButtonActionExecutor on ButtonAction {
 }
 
 extension _MenuRouting on ButtonAction {
+  bool get _isScreenKey =>
+      this == ButtonAction.yEquals ||
+      this == ButtonAction.window ||
+      this == ButtonAction.graph;
+
   void _sendToMenu(CalculatorBuffer buffer) {
     final key = _menuKey;
     if (key != null) {
