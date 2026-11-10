@@ -503,7 +503,7 @@ class CalculatorBuffer extends ChangeNotifier {
 
     if (!_canAddPower) return;
     _ensureLeftOperand();
-    insertToken(ExponentToken([NumberToken('-1')]));
+    insertToken(ExponentToken([NegateToken(), NumberToken('1')]));
   }
 
   void insertConstant(ConstantType type) {
@@ -522,6 +522,12 @@ class CalculatorBuffer extends ChangeNotifier {
     if (!isOnEditableLine) return;
 
     insertToken(AnsToken());
+  }
+
+  void insertNegate() {
+    if (!isOnEditableLine) return;
+
+    insertToken(NegateToken());
   }
 
   void insertOperator(OperatorType type) {

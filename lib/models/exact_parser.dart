@@ -138,6 +138,7 @@ class ExactParser {
 
   bool _startsOperand(CalcToken? token) {
     return token is NumberToken ||
+        token is NegateToken ||
         token is ConstantToken ||
         token is VariableToken ||
         token is AnsToken ||
@@ -149,6 +150,11 @@ class ExactParser {
 
   Rational _power() {
     final leading = _current;
+    if (leading is NegateToken) {
+      _pos++;
+      return -_power();
+    }
+
     var negate = false;
     Rational base;
 

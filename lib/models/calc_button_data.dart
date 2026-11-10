@@ -277,7 +277,7 @@ extension ButtonActionExecutor on ButtonAction {
         buffer.insertDigit(".");
         break;
       case ButtonAction.negative:
-        buffer.insertDigit("-");
+        buffer.insertNegate();
         break;
 
       case ButtonAction.add:

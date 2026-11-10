@@ -64,6 +64,7 @@ class ExpressionParser {
 
   bool _startsOperand(CalcToken? token) {
     return token is NumberToken ||
+        token is NegateToken ||
         token is ConstantToken ||
         token is VariableToken ||
         token is AnsToken ||
@@ -75,6 +76,11 @@ class ExpressionParser {
 
   double _parsePower() {
     final leading = _current;
+    if (leading is NegateToken) {
+      _pos++;
+      return -_parsePower();
+    }
+
     bool negate = false;
     double base;
 

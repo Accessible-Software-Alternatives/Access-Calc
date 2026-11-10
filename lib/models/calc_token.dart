@@ -115,6 +115,15 @@ class StoreToken extends CalcToken {
   int get cursorLength => 1;
 }
 
+// might be renamed when other things are included
+class NegateToken extends CalcToken {
+  @override
+  String get displayText => '-';
+
+  @override
+  int get cursorLength => 1;
+}
+
 enum OperatorType { add, subtract, multiply, divide, power }
 
 class OperatorToken extends CalcToken {
