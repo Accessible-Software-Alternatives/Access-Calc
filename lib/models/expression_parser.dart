@@ -16,6 +16,12 @@ class ExpressionParser {
 
   CalcToken? get _current => _pos < tokens.length ? tokens[_pos] : null;
 
+  double parseComplete() {
+    final result = parseExpression();
+    if (_current is CommaToken) throw SyntaxError(_pos);
+    return result;
+  }
+
   double parseExpression() {
     var result = _parseTerm();
 
@@ -192,26 +198,46 @@ class ExpressionParser {
     if (token is FunctionToken) {
       _pos++;
       if (_current is LeftParenToken) _pos++;
-      final arg = parseExpression();
+
+      final args = <double>[parseExpression()];
+      while (_current is CommaToken) {
+        _pos++;
+        args.add(parseExpression());
+      }
 
       final errorIndex = _current is RightParenToken ? _pos : tokens.length;
       if (_current is RightParenToken) _pos++;
 
-      if ((token.type == FunctionType.log || token.type == FunctionType.ln) &&
-          arg <= 0) {
-        throw NonrealAnswersError(errorIndex);
-      }
-      if (token.type == FunctionType.squareRoot && arg < 0) {
-        throw NonrealAnswersError(errorIndex);
-      }
-
-      return _applyFunction(token.type, arg);
+      return _applyFunction(token.type, args, errorIndex);
     }
 
     throw SyntaxError(_pos);
   }
 
-  double _applyFunction(FunctionType type, double arg) {
+  static int _minArgs(FunctionType type) {
+    switch (type) {
+      case FunctionType.min:
+      case FunctionType.max:
+      case FunctionType.lcm:
+      case FunctionType.gcd:
+        return 2;
+      default:
+        return 1;
+    }
+  }
+
+  static int _maxArgs(FunctionType type) =>
+      type == FunctionType.round ? 2 : _minArgs(type);
+
+  static bool _isInt(double v) => v.isFinite && v == v.truncateToDouble();
+
+  double _applyFunction(FunctionType type, List<double> args, int errorIndex) {
+    if (args.length < _minArgs(type) || args.length > _maxArgs(type)) {
+      throw SyntaxError(errorIndex);
+    }
+
+    final arg = args[0];
+
     switch (type) {
       case FunctionType.sin:
         return math.sin(arg);
@@ -220,8 +246,10 @@ class ExpressionParser {
       case FunctionType.tan:
         return math.tan(arg);
       case FunctionType.log:
+        if (arg <= 0) throw NonrealAnswersError(errorIndex);
         return math.log(arg) / math.ln10;
       case FunctionType.ln:
+        if (arg <= 0) throw NonrealAnswersError(errorIndex);
         return math.log(arg);
       case FunctionType.asin:
         return math.asin(arg);
@@ -230,7 +258,46 @@ class ExpressionParser {
       case FunctionType.atan:
         return math.atan(arg);
       case FunctionType.squareRoot:
+        if (arg < 0) throw NonrealAnswersError(errorIndex);
         return math.sqrt(arg);
+      case FunctionType.abs:
+        return arg.abs();
+      case FunctionType.iPart:
+        return arg.truncateToDouble();
+      case FunctionType.fPart:
+        return arg - arg.truncateToDouble();
+      case FunctionType.intFloor:
+        return arg.floorToDouble();
+      case FunctionType.round:
+        final digits = args.length == 2 ? args[1] : 0.0;
+        if (!_isInt(digits) || digits < 0 || digits > 9) {
+          throw ArgumentError(errorIndex);
+        }
+        final factor = math.pow(10, digits).toDouble();
+        return (arg * factor).roundToDouble() / factor;
+      case FunctionType.min:
+        return math.min(arg, args[1]);
+      case FunctionType.max:
+        return math.max(arg, args[1]);
+      case FunctionType.gcd:
+      case FunctionType.lcm:
+        final a = arg;
+        final b = args[1];
+        if (!_isInt(a) || !_isInt(b) || a < 0 || b < 0) {
+          throw ArgumentError(errorIndex);
+        }
+        final g = _gcd(a, b);
+        if (type == FunctionType.gcd) return g;
+        return g == 0 ? 0 : a / g * b;
     }
+  }
+
+  static double _gcd(double a, double b) {
+    while (b != 0) {
+      final t = a % b;
+      a = b;
+      b = t;
+    }
+    return a;
   }
 }

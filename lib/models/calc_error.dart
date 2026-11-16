@@ -28,6 +28,16 @@ class SyntaxError extends CalcError {
       'Check all arguments entered.\nPress + on menu item for Catalog Help.';
 }
 
+class ArgumentError extends CalcError {
+  ArgumentError(super.tokenIndex);
+
+  @override
+  String get title => 'ARGUMENT';
+  @override
+  String get message =>
+      'Check the type and number of arguments.\nPress + on menu item for catalog help.'; // TODO
+}
+
 class NonrealAnswersError extends CalcError {
   NonrealAnswersError(super.tokenIndex);
 

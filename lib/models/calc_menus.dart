@@ -1,5 +1,6 @@
 import 'package:graphing_calculator/models/calc_dialog.dart';
 import 'package:graphing_calculator/models/calc_menu.dart';
+import 'package:graphing_calculator/models/calc_token.dart';
 import 'package:graphing_calculator/models/calculator_buffer.dart';
 import 'package:graphing_calculator/models/graph_function.dart';
 
@@ -52,15 +53,15 @@ class CalcMenus {
           MenuItem('logBASE(', enabled: false),
         ]),
         MenuPage('NUM', [
-          MenuItem('abs(', enabled: false),
-          MenuItem('round(', enabled: false),
-          MenuItem('iPart(', enabled: false),
-          MenuItem('fPart(', enabled: false),
-          MenuItem('int(', enabled: false),
-          MenuItem('min(', enabled: false),
-          MenuItem('max(', enabled: false),
-          MenuItem('lcm(', enabled: false),
-          MenuItem('gcd(', enabled: false),
+          MenuItem('abs('),
+          MenuItem('round('),
+          MenuItem('iPart('),
+          MenuItem('fPart('),
+          MenuItem('int('),
+          MenuItem('min('),
+          MenuItem('max('),
+          MenuItem('lcm('),
+          MenuItem('gcd('),
         ]),
         MenuPage('CMPLX', [
           MenuItem('conj(', enabled: false),
@@ -77,8 +78,25 @@ class CalcMenus {
           MenuItem('randInt(', enabled: false),
         ]),
       ],
-      onSelect: (menu, _, __) => buffer.popMenu(),
+      onSelect: (menu, pageIndex, itemIndex) {
+        final type = _mathFunctions['$pageIndex:$itemIndex'];
+        buffer.popMenu();
+        if (type != null) buffer.insertToken(FunctionToken(type));
+      },
       onCancel: (_) => buffer.popMenu(),
     );
   }
+
+  // Maybe change
+  static const Map<String, FunctionType> _mathFunctions = {
+    '1:0': FunctionType.abs,
+    '1:1': FunctionType.round,
+    '1:2': FunctionType.iPart,
+    '1:3': FunctionType.fPart,
+    '1:4': FunctionType.intFloor,
+    '1:5': FunctionType.min,
+    '1:6': FunctionType.max,
+    '1:7': FunctionType.lcm,
+    '1:8': FunctionType.gcd,
+  };
 }

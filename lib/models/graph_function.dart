@@ -93,7 +93,7 @@ class GraphFunction {
       final y = ExpressionParser(
         tokens,
         variables: variables,
-      ).parseExpression();
+      ).parseComplete();
       return y.isFinite ? y : double.nan;
     } catch (_) {
       return double.nan;

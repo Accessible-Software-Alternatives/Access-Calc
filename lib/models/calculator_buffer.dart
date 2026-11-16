@@ -229,7 +229,7 @@ class CalculatorBuffer extends ChangeNotifier {
         tokens,
         variables: variables,
         ans: lastAnswer,
-      ).parseExpression();
+      ).parseComplete();
     } catch (_) {
       value = null;
     }
@@ -1161,7 +1161,7 @@ class CalculatorBuffer extends ChangeNotifier {
       tokens,
       variables: variables,
       ans: lastAnswer,
-    ).parseExpression();
+    ).parseComplete();
 
     final output = _resultTokens(result, tokens, tokens.length);
     _recordAnswer(result);
@@ -1223,7 +1223,7 @@ class CalculatorBuffer extends ChangeNotifier {
       source,
       variables: variables,
       ans: lastAnswer,
-    ).parseExpression();
+    ).parseComplete();
 
     final output = _resultTokens(value, source, storeIndex);
     variables[target.name] = value;

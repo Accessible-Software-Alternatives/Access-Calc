@@ -124,6 +124,14 @@ class NegateToken extends CalcToken {
   int get cursorLength => 1;
 }
 
+class CommaToken extends CalcToken {
+  @override
+  String get displayText => ',';
+
+  @override
+  int get cursorLength => 1;
+}
+
 enum OperatorType { add, subtract, multiply, divide, power }
 
 class OperatorToken extends CalcToken {
@@ -148,7 +156,26 @@ class OperatorToken extends CalcToken {
   }
 }
 
-enum FunctionType { sin, cos, tan, log, ln, asin, acos, atan, squareRoot }
+enum FunctionType {
+  sin,
+  cos,
+  tan,
+  log,
+  ln,
+  asin,
+  acos,
+  atan,
+  squareRoot,
+  abs,
+  round,
+  iPart,
+  fPart,
+  intFloor,
+  min,
+  max,
+  lcm,
+  gcd,
+}
 
 class FunctionToken extends CalcToken {
   final FunctionType type;
@@ -176,6 +203,24 @@ class FunctionToken extends CalcToken {
         return 'tan⁻¹(';
       case FunctionType.squareRoot:
         return '√(';
+      case FunctionType.abs: // Might be changed to special |x|
+        return 'abs(';
+      case FunctionType.round:
+        return 'round(';
+      case FunctionType.iPart:
+        return 'iPart(';
+      case FunctionType.fPart:
+        return 'fPart(';
+      case FunctionType.intFloor:
+        return 'int(';
+      case FunctionType.min:
+        return 'min(';
+      case FunctionType.max:
+        return 'max(';
+      case FunctionType.lcm:
+        return 'lcm(';
+      case FunctionType.gcd:
+        return 'gcd(';
     }
   }
 }

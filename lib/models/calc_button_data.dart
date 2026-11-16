@@ -417,6 +417,9 @@ extension ButtonActionExecutor on ButtonAction {
         break;
 
       case ButtonAction.comma:
+        buffer.insertToken(CommaToken());
+        break;
+
       case ButtonAction.vars:
       case ButtonAction.zoom:
       case ButtonAction.trace:
